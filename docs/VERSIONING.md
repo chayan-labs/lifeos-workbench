@@ -1,0 +1,92 @@
+# lifeos-vcs - universal version control for every file type
+
+> The headline differentiator: git-style history, branches, tags, diffs, and time-travel over **videos, images, design files, 3D scenes, audio, PSDs, docs - anything** - not just code.
+> Nobody else has this. It is a Rust service, and it composes natively with the append-only `events` log (a `version.created` event *is* a commit).
+
+---
+
+## 1. Why it exists
+
+- Notion/Drive/Figma each have weak, siloed, type-specific version history you cannot diff, branch, or reason about across domains.
+- Git + Git-LFS handle code and "large files" but give no *semantic* diff for binary/media and no cross-domain snapshot.
+- Life OS already has the perfect substrate: `entities` (the tree of files), `edges` (links), `events` (append-only history). `lifeos-vcs` turns these into a real VCS for everything.
+
+---
+
+## 2. Core model
+
+### 2.1 Content-addressed store (CAS)
+- Every file blob is hashed with **BLAKE3** (Rust, fast, parallel) → `blob_ref` = the hash.
+- Identical content is stored once (dedup). The bytes live in `objects/<hh>/<hash>` locally, mirrored to **Cloudflare R2/S3** out-of-band (NOT through libSQL - blobs never go in the DB or the replica sync).
+- File-bearing entities store only the `blob_ref` (see [DATA-MODEL.md](./DATA-MODEL.md) §2.1) - LFS-style pointer model.
+
+### 2.2 Big-file dedup via content-defined chunking
+- Large/re-exported media (a 2GB video re-rendered) would naively re-store the whole file.
+- **FastCDC** (Rust crate) splits blobs into content-defined chunks; only changed chunks are stored. A re-export with a trimmed intro re-stores ~one chunk, not 2GB.
+- Each blob = a manifest of chunk hashes (a Merkle list); the blob hash is the hash of that manifest.
+
+### 2.3 History = the events log
+- Each change to a file-bearing entity emits `version.created` with `{entity_id, blob_ref, parent_blob_ref, author, message, ts}`.
+- The version history of any file is therefore a query over `events` - **no separate history table.**
+- Because `events` is append-only and conflict-free, version history survives sync without merge hazards.
+
+### 2.4 Snapshots, branches, tags (git-style over EVERYTHING)
+- A **snapshot** = a content-addressed Merkle manifest of `{entity_id → blob_ref}` across the whole workspace (or a filtered subset) at a point in time.
+- A **branch** = a named, moving pointer to a snapshot; a **tag** = a fixed pointer.
+- This gives **time-travel over your entire life**, not one repo: "show me everything as it was 3 weeks ago", "branch my design system, try a variant, merge or discard."
+- Snapshot/branch/merge logic is modeled on **Jujutsu (jj)** (Rust, git-compatible, superior large-file & conflict model) - fork its CAS/commit engine or port the model rather than reimplementing.
+
+---
+
+## 3. Per-type semantic diff
+
+A raw byte diff is useless for media. Each module declares a `diff(a, b)` function per entity type in its manifest; `lifeos-vcs` orchestrates it and asks Haiku to write a plain-English "what changed" summary.
+
+| Type | Diff strategy |
+|---|---|
+| text / code / markdown | line diff (existing) |
+| Godot `.tscn` / `.tres` | **text diff** (they are text!) - first-class scene history for free |
+| image (png/jpg) | perceptual hash + pixel/region diff + thumbnail-overlay |
+| video | scene/keyframe diff (changed segments + timestamps) |
+| audio | waveform / transcript diff (via lifeos-ingest) |
+| Figma | node-tree diff (added/removed/changed nodes) via mcp-figma |
+| 3D (glb/fbx/Unity/Unreal) | metadata + chunk-level diff; node graph where text-exportable |
+| PDF / docx | extracted-text diff + page-image diff |
+
+The `diff` plugin contract:
+```js
+// in modules/<id>/module.js
+diff: {
+  asset: async (aBlob, bBlob, ctx) => ({
+    kind: 'video',
+    changedSegments: [{ t_start, t_end, note }],
+    summary: '<one-line, AI-written>',
+    preview: '<blob_ref to a generated diff thumbnail/overlay>'
+  })
+}
+```
+
+---
+
+## 4. The `lifeos-vcs` service (Rust)
+
+Responsibilities:
+1. **Hash & store** blobs (BLAKE3 + FastCDC chunking), dedup, mirror to R2/S3.
+2. **Commit** - emit `version.created` events; update entity `blob_ref`.
+3. **Diff** - dispatch to the per-type plugin; cache results.
+4. **Snapshot/branch/tag/checkout** - Merkle manifests; restore any entity or the whole workspace to a past state.
+5. **GC** - drop unreferenced chunks (mark-and-sweep against live snapshots).
+
+Why Rust: tight hashing/IO loops, large-file throughput, memory safety on a security-relevant store, and native composition with libSQL (also Rust). Candidate crates: `blake3`, `fastcdc`, `jj-lib` (Jujutsu), `object_store` (R2/S3), `rusqlite`/libSQL client.
+
+CLI surface (thin, allow-listed): `lifeos file commit|diff|log|checkout|snapshot|branch|tag`.
+
+---
+
+## 5. Interaction with sync & gating
+
+- **Blobs sync out-of-band** to R2/S3, keyed by hash - never through the libSQL replica (keeps the DB small and conflict-free).
+- **Version history (`events`) syncs** as normal append-only rows.
+- **Reads/diffs/time-travel are free** (internal, reversible).
+- **Outward sharing** (publishing a versioned file, `drive.share`) is **gated**.
+- Pairs with [MEDIA-INTELLIGENCE.md](./MEDIA-INTELLIGENCE.md): on `version.created`, `lifeos-ingest` (re)derives transcripts/captions so search stays current per version.

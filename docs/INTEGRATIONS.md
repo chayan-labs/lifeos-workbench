@@ -1,0 +1,81 @@
+# Integrations - the owned-credential model
+
+> **The defining constraint:** Life OS must NOT depend on the claude.ai MCP connectors (Gmail/Calendar/Drive/Notion/Slack).
+> Those live inside a claude.ai account that is **not ours** (a lead account we only have Claude Code access to).
+> Building on them dies the moment access changes, and they are not SaaS-ready (someone else's OAuth, quota, and tokens).
+> **Every third-party integration therefore uses developer apps WE own, via self-hosted Nango + a browser actuator.**
+
+This is not only safer - it is the exact model multi-tenant SaaS requires, so we get the SaaS seam for free.
+
+---
+
+## 1. The model in one picture
+
+```
+  Agent / harness                Local lifeos API (Rust)            Provider
+  holds only a       ──tool──►   resolves connectionId    ──proxy──►  Gmail / Notion /
+  connectionId handle            via Nango, injects token             Slack / X / …
+  (NEVER a secret)               server-side                          (token never seen
+                                                                       by the agent)
+```
+
+- **Nango (self-hosted)** is the OAuth vault: it runs the OAuth dance, stores tokens **encrypted at rest**, **auto-refreshes**, and exposes a **Proxy** (`nango.proxy({connectionId, endpoint})`) that injects the live token server-side and returns only the API response.
+- The agent/harness only ever holds a `connectionId` (a row in `connections`), never a token. This is precisely the "API injects tokens at call time, secrets never in agent context" requirement - already implemented by Nango.
+- **Reads are free; writes/publishes are human-gated.** Nango is transport, not policy - the gate stays in the local API (route reads straight through the proxy; route writes into the draft → Telegram-approve → execute queue before the proxy fires).
+
+---
+
+## 2. Provider matrix
+
+| Provider | Mechanism | Owned credential | Read | Write |
+|---|---|---|---|---|
+| Gmail | Nango `google-mail` | your Google Cloud OAuth app | free | 🔒 send |
+| Google Calendar | Nango `google-calendar` | same Google app | free | 🔒 create/move |
+| Google Drive | Nango `google-drive` | same Google app | free | 🔒 upload/share |
+| Notion | Nango `notion` | your Notion integration | free | two-way sync |
+| Slack | Nango `slack` (or native bot token) | your Slack app | free | 🔒 post |
+| Instagram | Nango | your Meta app | free | 🔒 publish |
+| X / Twitter | Nango | your X app | free | 🔒 publish |
+| Reddit | Nango | your Reddit app | free | 🔒 post |
+| WhatsApp | **native** WhatsApp Business Cloud API (custom connector) | your Meta app | free | 🔒 send |
+| Zerodha Kite | **native** custom connector (daily request-token, read-scoped) | your Kite app | free (read-only) | **never** (see SECURITY.md) |
+| Figma | mcp-figma (on-demand) + Nango for file metadata | your Figma app | free | gated writes |
+| Higgsfield | mcp-higgsfield (on-demand, OAuth) | your account | n/a | generate |
+| GitHub | Nango `github` (or octocrab in the Rust API) | your GitHub app | free | issues/PRs free; 🔒 merge/release |
+| Any no-API service | **browser actuator** (§4) | encrypted browser session | free | 🔒 everything |
+
+**One-time owned setup:** one Google Cloud project (covers Gmail+Calendar+Drive), one Notion integration, one Slack app, one Meta app (IG+WhatsApp), one X app, one Reddit app, one GitHub app, one Figma app, one Kite app. You fully own all of them.
+
+---
+
+## 3. Nango details
+
+- **License:** Elastic License 2.0 (source-available). Free to self-host as an internal vault; the only restriction is "don't resell Nango-itself as a managed service" - which Life OS never does. The docker-compose edition covers managed-auth + proxy (the Helm/full self-host path is Enterprise-gated, not needed).
+- **Deployment:** runs on the trusted Mac (or a tiny always-on host). Owns OAuth callback URLs. The Cloudflare Worker's only integration role is to forward callbacks if the always-on host is the Worker; it never stores a token.
+- **`connections` mapping:** each connected account = one `connections` row carrying `provider`, `account_handle`, `nango_connection_id`. Many accounts per provider = many `connectionId`s. See [DATA-MODEL.md](./DATA-MODEL.md) §3.
+- **Custom connectors** (Kite, WhatsApp) that Nango doesn't model cleanly store an envelope-encrypted secret in `connections.secret_enc` and are called by bespoke code in the Rust API - still never in agent context.
+- **If ELv2 ever conflicts** (it won't for our use): fork Nango (ELv2 permits), or fall back to OpenBao (MPL-2.0) for the vault + hand-rolled OAuth for our ~8 providers (an excellent Rust task). No fully-MIT drop-in equivalent exists - this is the one "might build ourselves" risk. See [LICENSING-REUSE.md](./LICENSING-REUSE.md).
+
+---
+
+## 4. Browser actuator (browser-use / browser-harness)
+
+The universal outward actuator for services with **no API** (or where the API is too limited): the AI drives a real browser to publish, fill dashboards, scrape, book travel, operate any logged-in tool.
+
+- **Source:** fork `browser-use/browser-harness` (Python). Wrapped as a single gated `agentTool` `browser.act`.
+- **Where:** Mac-only (trusted), loaded on-demand via mcp-multiplexer, unloaded after.
+- **Sessions/cookies:** stored encrypted exactly like `connections`; never in agent context.
+- **Gating:** **always human-gated for outward actions** - it can do anything a logged-in you can. Reads/scrapes are free; any state-changing action is draft → approve → execute.
+- **Pairing:** Nango (API providers) + browser actuator (everything else) = Life OS can integrate **literally any service**.
+
+---
+
+## 5. Why MCPs are NOT the connector layer
+
+MCPs in Life OS are reserved strictly for **heavy on-demand capability tools** loaded through mcp-multiplexer - Figma, Higgsfield, game engines (Godot/Unity/Unreal). These are *capability* tools, not *credential-bearing connectors*, and they are unloaded after use for token discipline.
+
+**CRUD and credentialed reads/writes are never an MCP.** They are thin HTTP tools (`~/.claude/bin/lifeos gmail …`) calling the Nango proxy. This keeps:
+- the always-on context minimal,
+- secrets out of the agent,
+- the integration layer independent of any claude.ai account,
+- the whole thing SaaS-portable.
