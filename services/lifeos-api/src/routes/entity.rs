@@ -94,6 +94,7 @@ pub struct ListParams {
     status: Option<String>,
     parent_id: Option<String>,
     limit: Option<u32>,
+    offset: Option<u32>,
 }
 
 pub async fn list(
@@ -121,7 +122,8 @@ pub async fn list(
         }
     }
     let limit = params.limit.unwrap_or(500).min(2000);
-    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {limit}"));
+    let offset = params.offset.unwrap_or(0);
+    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}"));
 
     let rows = state.conn.query(&sql, libsql::params_from_iter(binds)).await?;
     Ok(Json(collect(rows, |r| read_entity(r)).await?))

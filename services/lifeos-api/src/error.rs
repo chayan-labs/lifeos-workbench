@@ -52,11 +52,14 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// Convenience: turn any libSQL error into an opaque 500 (details go to logs only,
-/// never to the client - per the "errors don't leak internals" rule).
+/// Convenience: turn any libSQL error into an opaque 500. The concrete cause is
+/// logged here and never travels to the client - per the "errors don't leak
+/// internals" rule (docs/SECURITY.md §1). The client only ever sees a flat,
+/// generic `{ "error": "internal database error" }`.
 impl From<libsql::Error> for ApiError {
     fn from(e: libsql::Error) -> Self {
-        ApiError::Internal(format!("database error: {e}"))
+        tracing::error!("database error: {e}");
+        ApiError::Internal("internal database error".into())
     }
 }
 

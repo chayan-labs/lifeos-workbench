@@ -166,6 +166,74 @@ async fn entity_get_and_update_emits_event() {
 }
 
 #[tokio::test]
+async fn entity_list_paginates_with_limit_and_offset() {
+    let app = test_app().await;
+    for i in 0..3 {
+        send(
+            &app.router,
+            "POST",
+            "/api/entity",
+            Some(json!({"module": "tasks", "type": "task", "title": format!("t{i}")})),
+        )
+        .await;
+    }
+    // First page (limit 2) and second page (offset 2) partition the 3 rows.
+    let (_, page1) = send(&app.router, "GET", "/api/entity?module=tasks&limit=2", None).await;
+    let (_, page2) = send(&app.router, "GET", "/api/entity?module=tasks&limit=2&offset=2", None).await;
+    assert_eq!(page1.as_array().unwrap().len(), 2);
+    assert_eq!(page2.as_array().unwrap().len(), 1);
+    // No overlap between pages.
+    let id_a = page1[0]["id"].as_str().unwrap();
+    let id_b = page2[0]["id"].as_str().unwrap();
+    assert_ne!(id_a, id_b);
+}
+
+#[tokio::test]
+async fn edge_state_lifecycle_filter_and_transition() {
+    let app = test_app().await;
+    let (_, a) = send(&app.router, "POST", "/api/entity", Some(json!({"module": "tasks", "type": "task"}))).await;
+    let (_, b) = send(&app.router, "POST", "/api/entity", Some(json!({"module": "tasks", "type": "task"}))).await;
+    let (src, dst) = (a["id"].as_str().unwrap(), b["id"].as_str().unwrap());
+
+    // Create a pending edge.
+    let (st, edge) = send(
+        &app.router,
+        "POST",
+        "/api/edge",
+        Some(json!({"src_id": src, "dst_id": dst, "rel": "depends_on", "state": "pending"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(edge["state"], "pending");
+    let edge_id = edge["id"].as_str().unwrap();
+
+    // Filter by state surfaces it under pending, not accepted.
+    let (_, pending) = send(&app.router, "GET", "/api/edge?state=pending", None).await;
+    assert_eq!(pending.as_array().unwrap().len(), 1);
+    let (_, accepted) = send(&app.router, "GET", "/api/edge?state=accepted", None).await;
+    assert_eq!(accepted.as_array().unwrap().len(), 0);
+
+    // Transition pending -> accepted.
+    let (st, moved) = send(
+        &app.router,
+        "PATCH",
+        &format!("/api/edge/{edge_id}"),
+        Some(json!({"state": "accepted"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(moved["state"], "accepted");
+
+    // Now it lists under accepted.
+    let (_, accepted2) = send(&app.router, "GET", "/api/edge?state=accepted", None).await;
+    assert_eq!(accepted2.as_array().unwrap().len(), 1);
+
+    // Patching a missing edge -> 404.
+    let (st, _) = send(&app.router, "PATCH", "/api/edge/edg_missing", Some(json!({"state": "accepted"}))).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn events_are_append_only_no_mutation_routes() {
     let app = test_app().await;
     let (st, _) = send(

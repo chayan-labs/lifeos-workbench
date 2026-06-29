@@ -7,7 +7,7 @@ use crate::ids::{new_id, now_secs};
 use crate::models::{collect, read_edge, Edge, COLS_EDGE};
 use crate::state::AppState;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -75,6 +75,7 @@ pub struct ListParams {
     src_id: Option<String>,
     dst_id: Option<String>,
     rel: Option<String>,
+    state: Option<String>,
     limit: Option<u32>,
 }
 
@@ -93,6 +94,7 @@ pub async fn list(
         ("src_id", &params.src_id),
         ("dst_id", &params.dst_id),
         ("rel", &params.rel),
+        ("state", &params.state),
     ] {
         if let Some(v) = val {
             sql.push_str(&format!(" AND {col} = ?{next}"));
@@ -105,4 +107,47 @@ pub async fn list(
 
     let rows = state.conn.query(&sql, libsql::params_from_iter(binds)).await?;
     Ok(Json(collect(rows, |r| read_edge(r)).await?))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateEdge {
+    /// The only mutable field: the edge's lifecycle state ('pending' -> 'accepted').
+    /// `edges` is otherwise immutable; relations are created or dropped, not rewritten.
+    state: String,
+    workspace_id: Option<String>,
+}
+
+/// Transition an edge's `state` (the pending/accepted lifecycle). Workspace-scoped.
+pub async fn update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateEdge>,
+) -> ApiResult<Json<Edge>> {
+    if req.state.trim().is_empty() {
+        return Err(ApiError::BadRequest("state is required".into()));
+    }
+    let workspace_id =
+        resolve_workspace(&headers, &state.config.jwt_secret, req.workspace_id.as_deref());
+
+    let changed = state
+        .conn
+        .execute(
+            "UPDATE edges SET state = ?1 WHERE id = ?2 AND workspace_id = ?3",
+            libsql::params![req.state, id.clone(), workspace_id.clone()],
+        )
+        .await?;
+    if changed == 0 {
+        return Err(ApiError::NotFound(format!("edge '{id}' not found")));
+    }
+
+    let mut rows = state
+        .conn
+        .query(
+            &format!("SELECT {COLS_EDGE} FROM edges WHERE id = ?1 AND workspace_id = ?2"),
+            libsql::params![id, workspace_id],
+        )
+        .await?;
+    let row = rows.next().await?.ok_or_else(|| ApiError::Internal("edge vanished".into()))?;
+    Ok(Json(read_edge(&row)?))
 }

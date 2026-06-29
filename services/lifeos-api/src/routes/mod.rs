@@ -13,7 +13,7 @@ mod edge;
 
 use crate::state::AppState;
 use axum::{
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 
@@ -27,6 +27,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/entity/:id", get(entity::get_one).patch(entity::update))
         // --- graph edges ---
         .route("/api/edge", post(edge::create).get(edge::list))
+        .route("/api/edge/:id", patch(edge::update))
         // --- events: append-only. Only POST (append) + GET (read) are wired;
         //     PUT/PATCH/DELETE resolve to 405 because no route defines them. ---
         .route("/api/event", post(event::create).get(event::list))
