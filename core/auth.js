@@ -7,8 +7,8 @@
 
   const auth = {
     currentUser: {
-      id: "chayan",
-      email: "chayan@example.com",
+      id: "usr_chayan",
+      email: "chayan@lifeos.app",
       name: "Chayan Aggarwal"
     },
     activeWorkspace: {

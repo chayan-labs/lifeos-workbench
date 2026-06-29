@@ -20,6 +20,9 @@ Read this file first, then the focused sub-documents it links.
 | [VERSIONING.md](./VERSIONING.md)                 | `lifeos-vcs` - the universal content-addressed VCS for every file type (CAS, chunking, snapshots, per-type semantic diff)    |
 | [MEDIA-INTELLIGENCE.md](./MEDIA-INTELLIGENCE.md) | `lifeos-ingest` - transcription/captioning/parsing → memvec; the honest memvec capability boundary; CLIP                     |
 | [SELF-EXTENSION.md](./SELF-EXTENSION.md)         | The "Ask AI to add a module" builder on the Claude Agent SDK; tool-locking; two validators; sandbox                          |
+| [AGENT-CONTROL.md](./AGENT-CONTROL.md)           | Universal in-app agent actuation: typed action registry, the four protected domains, dry-run previews, action ledger + undo, capability matrix |
+| [AI-MEMORY.md](./AI-MEMORY.md)                   | The cognitive memory architecture: event-sourced memory, episodic/semantic/procedural layers, activation-scored retrieval, consolidation, the context compiler, bi-temporal forgetting |
+| [STORAGE-BACKENDS.md](./STORAGE-BACKENDS.md)     | Bring-your-own blob storage: pluggable `StorageBackend` (R2/S3/Drive/Dropbox/local) for VCS/repo/file data; fetch + markdown render; integrity + token isolation |
 | [HARNESS-LOOP.md](./HARNESS-LOOP.md)             | Event store, Eval+Gate, Observe, Release loop; reuse of existing harness infra                                               |
 | [PLATFORM-SYSTEMS.md](./PLATFORM-SYSTEMS.md)     | Command bar, agent pipelines, dashboards/analytics, module marketplace, PWA                                                  |
 | [RUST-COMPONENTS.md](./RUST-COMPONENTS.md)       | Full inventory of what is/should be Rust, with crate choices and rationale                                                   |

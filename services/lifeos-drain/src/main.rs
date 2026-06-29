@@ -59,7 +59,7 @@ async fn main() {
                     sleep(Duration::from_secs(2)).await;
                     
                     // Mark as done
-                    let _ = conn.execute("UPDATE jobs SET status='done' WHERE id=?1", libsql::params![job_id]).await;
+                    let _ = conn.execute("UPDATE jobs SET status='done' WHERE id=?1", libsql::params![job_id.clone()]).await;
                     println!("Finished job {}", job_id);
                 } else {
                     // No jobs available
