@@ -78,7 +78,9 @@ pub async fn metrics(
         "jobs_queued": jobs_queued,
         "active_connections": connections,
         "entities_by_module": group_count(&state, "module", "entities", &ws).await?,
+        "entities_by_type": group_count(&state, "type", "entities", &ws).await?,
         "events_by_type": group_count(&state, "type", "events", &ws).await?,
+        "jobs_by_status": group_count(&state, "status", "jobs", &ws).await?,
     })))
 }
 

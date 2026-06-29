@@ -300,6 +300,14 @@ async fn metrics_aggregates_over_the_workspace() {
     assert_eq!(body["entities"], 1);
     assert!(body["events"].as_i64().unwrap() >= 1);
     assert_eq!(body["entities_by_module"]["tasks"], 1);
+    // Completeness (#6): grouped by type, and events/jobs rollups present.
+    assert_eq!(body["entities_by_type"]["task"], 1);
+    assert_eq!(body["events_by_type"]["entity.created"], 1);
+    assert!(body["jobs_by_status"].is_object());
+    // Harness rollup keys exist and are numeric (COALESCE'd, never null).
+    assert!(body["tokens_in"].is_number());
+    assert!(body["cost"].is_number());
+    assert!(body["gated_actions"].is_number());
 }
 
 #[tokio::test]
