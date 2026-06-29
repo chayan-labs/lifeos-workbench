@@ -18,10 +18,11 @@ use std::sync::Arc;
 
 /// Open the DB, detect agents, and assemble shared state from a config.
 pub async fn build_state(config: Config) -> Result<AppState, libsql::Error> {
-    let conn = db::connect(&config.db_path).await?;
+    let db = db::connect(&config).await?;
     let agents = agents::detect();
     Ok(AppState {
-        conn: Arc::new(conn),
+        conn: Arc::new(db.conn),
+        database: Arc::new(db.database),
         config,
         agents: Arc::new(agents),
     })

@@ -13,6 +13,18 @@ pub const DEFAULT_WORKSPACE: &str = "default-personal-workspace";
 pub struct Config {
     /// libSQL/SQLite file path for the canonical DB (embedded replica on the Mac).
     pub db_path: String,
+    /// Canonical Turso primary URL. When set (with `turso_token`), `db_path`
+    /// becomes an embedded replica syncing against it; otherwise the canonical DB
+    /// is a pure local file (fully offline - the personal-Mac default).
+    pub turso_url: Option<String>,
+    /// Auth token for the Turso primary. Held only by this single DB-token owner.
+    pub turso_token: Option<String>,
+    /// Background pull interval (seconds) for the embedded replica.
+    pub sync_interval_secs: u64,
+    /// Separate, NEVER-synced SQLite file holding derived/search state (FTS5 +
+    /// sqlite-vec). Physically distinct from `db_path` so it can never be pushed
+    /// to the primary (libSQL has no table-level sync-exclusion). See DATA-MODEL §5.
+    pub derived_db_path: String,
     /// Address the local API binds to. Localhost-only by design (single-owner).
     pub bind_addr: SocketAddr,
     /// HMAC secret for signing/verifying `key_token` JWTs.
@@ -26,6 +38,16 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Self {
         let db_path = std::env::var("LIFEOS_DB_PATH").unwrap_or_else(|_| "lifeos.db".to_string());
+
+        // Embedded-replica sync is opt-in: only when BOTH the URL and token are set.
+        let turso_url = std::env::var("TURSO_URL").ok().filter(|s| !s.is_empty());
+        let turso_token = std::env::var("TURSO_TOKEN").ok().filter(|s| !s.is_empty());
+        let sync_interval_secs = std::env::var("LIFEOS_SYNC_INTERVAL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        let derived_db_path =
+            std::env::var("LIFEOS_DERIVED_DB_PATH").unwrap_or_else(|_| "lifeos-derived.db".to_string());
 
         let bind_addr = std::env::var("LIFEOS_BIND_ADDR")
             .ok()
@@ -48,6 +70,10 @@ impl Config {
 
         Self {
             db_path,
+            turso_url,
+            turso_token,
+            sync_interval_secs,
+            derived_db_path,
             bind_addr,
             jwt_secret,
             agent_cwd,

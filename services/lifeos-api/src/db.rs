@@ -2,22 +2,76 @@
 //! tenant. Migrations are embedded at compile time so the binary runs correctly
 //! regardless of the working directory it is launched from.
 
-use crate::config::DEFAULT_WORKSPACE;
+use crate::config::{Config, DEFAULT_WORKSPACE};
 use crate::ids::now_secs;
-use libsql::{Builder, Connection};
+use libsql::{Builder, Connection, Database};
+use std::time::Duration;
 
 /// Migrations are baked into the binary. Paths are relative to this source file
 /// (`services/lifeos-api/src/db.rs` -> repo-root `migrations/`).
 const MIGRATION_CORE: &str = include_str!("../../../migrations/0001_core.sql");
 const MIGRATION_CONTROL: &str = include_str!("../../../migrations/0002_control_plane.sql");
 
-/// Open the DB, apply migrations, and seed the default workspace/user.
-pub async fn connect(db_path: &str) -> Result<Connection, libsql::Error> {
-    let db = Builder::new_local(db_path).build().await?;
-    let conn = db.connect()?;
+/// The canonical DB plus its live connection. `database` is retained by the caller
+/// so the embedded-replica's background replicator stays alive (dropping it would
+/// stop syncing) and so an explicit `database.sync()` can be triggered.
+pub struct Db {
+    pub database: Database,
+    pub conn: Connection,
+}
+
+/// Open the canonical DB, apply migrations, seed the default tenant, and ATTACH the
+/// separate derived DB.
+///
+/// Two modes (DATA-MODEL §4):
+/// - **local-first (default):** `db_path` is a plain local libSQL file. Fully
+///   offline; writes never need the network. This is the personal-Mac default.
+/// - **embedded replica:** when `turso_url` + `turso_token` are set, `db_path`
+///   becomes a replica of the Turso primary with read-your-writes and periodic
+///   background pull (`sync_interval_secs`).
+///
+/// Conflict model is **last-push-wins at row granularity over the whole `attrs`
+/// blob - NOT last-writer-wins on `updated_at`** (libSQL's actual behavior). The
+/// defenses are single-writer-per-row tiering (bot vs Mac lanes) plus the
+/// append-only `events` log as the reconciliation source of truth.
+///
+/// Offline writes against a remote replica (the JS client's `offline:true`, Turso
+/// Sync public beta) are **not** available in the Rust libSQL 0.6 client; the
+/// local-first plain-file mode is how we stay offline-capable until that lands.
+pub async fn connect(config: &Config) -> Result<Db, libsql::Error> {
+    let database = match (&config.turso_url, &config.turso_token) {
+        (Some(url), Some(token)) => {
+            tracing::info!("opening embedded replica against Turso primary");
+            Builder::new_remote_replica(&config.db_path, url.clone(), token.clone())
+                .read_your_writes(true)
+                .sync_interval(Duration::from_secs(config.sync_interval_secs))
+                .build()
+                .await?
+        }
+        _ => {
+            tracing::info!("opening local-first canonical DB (no Turso sync configured)");
+            Builder::new_local(&config.db_path).build().await?
+        }
+    };
+
+    let conn = database.connect()?;
     run_migrations(&conn).await?;
     seed(&conn).await?;
-    Ok(conn)
+    attach_derived(&conn, &config.derived_db_path).await?;
+
+    Ok(Db { database, conn })
+}
+
+/// ATTACH the never-synced derived DB as schema `d`. Physically separate from the
+/// canonical file so FTS5/sqlite-vec state can never be pushed to the primary
+/// (libSQL has no table-level sync-exclusion flag). See DATA-MODEL §5.
+pub async fn attach_derived(conn: &Connection, derived_path: &str) -> Result<(), libsql::Error> {
+    // `?` would be parsed as a bind; ATTACH needs the literal path. The path comes
+    // from our own config, never from request input, so interpolation is safe here.
+    conn.execute(&format!("ATTACH DATABASE 'file:{derived_path}' AS d"), ())
+        .await?;
+    tracing::info!("attached derived DB '{derived_path}' as schema 'd' (never synced)");
+    Ok(())
 }
 
 pub async fn run_migrations(conn: &Connection) -> Result<(), libsql::Error> {
@@ -90,9 +144,24 @@ pub async fn workspace_exists(conn: &Connection, workspace_id: &str) -> Result<b
 mod tests {
     use super::*;
 
+    fn test_config(path: &str) -> Config {
+        Config {
+            db_path: path.to_string(),
+            turso_url: None,
+            turso_token: None,
+            sync_interval_secs: 60,
+            derived_db_path: format!("{path}.derived"),
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            jwt_secret: "test".into(),
+            agent_cwd: None,
+            agent_timeout_secs: 30,
+        }
+    }
+
     async fn fresh(path: &str) -> Connection {
         let _ = std::fs::remove_file(path);
-        connect(path).await.unwrap()
+        let _ = std::fs::remove_file(format!("{path}.derived"));
+        connect(&test_config(path)).await.unwrap().conn
     }
 
     #[tokio::test]
@@ -122,6 +191,37 @@ mod tests {
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM plans WHERE id='free'").await, 1);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn derived_db_is_attached_as_a_separate_file() {
+        let path = "test_db_derived.db";
+        let _ = std::fs::remove_file(path);
+        let cfg = test_config(path);
+        let _ = std::fs::remove_file(&cfg.derived_db_path);
+        let conn = connect(&cfg).await.unwrap().conn;
+
+        // Derived schema `d` is usable.
+        conn.execute("CREATE TABLE d.derived_probe (x INTEGER)", ()).await.unwrap();
+        conn.execute("INSERT INTO d.derived_probe (x) VALUES (42)", ()).await.unwrap();
+        let mut rows = conn.query("SELECT x FROM d.derived_probe", ()).await.unwrap();
+        let x: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(x, 42);
+
+        // The derived table exists ONLY in `d`, never in the canonical (synced) DB.
+        let in_main = count(
+            &conn,
+            "SELECT COUNT(*) FROM main.sqlite_master WHERE name = 'derived_probe'",
+        )
+        .await;
+        assert_eq!(in_main, 0, "derived state must not land in the canonical DB");
+
+        // It is a physically distinct file (this is what enforces 'never synced').
+        assert!(std::path::Path::new(&cfg.derived_db_path).exists());
+        assert_ne!(cfg.derived_db_path, cfg.db_path);
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(&cfg.derived_db_path);
     }
 
     /// Helper: run a `SELECT COUNT(*)` and return the integer.

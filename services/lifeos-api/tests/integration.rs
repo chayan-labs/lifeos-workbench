@@ -17,6 +17,7 @@ struct TestApp {
 impl Drop for TestApp {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.db_path);
+        let _ = std::fs::remove_file(format!("{}.derived", self.db_path));
     }
 }
 
@@ -28,6 +29,10 @@ async fn test_app() -> TestApp {
     let _ = std::fs::remove_file(&db_path);
     let config = Config {
         db_path: db_path.clone(),
+        turso_url: None,
+        turso_token: None,
+        sync_interval_secs: 60,
+        derived_db_path: format!("{db_path}.derived"),
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         jwt_secret: "test-secret".into(),
         agent_cwd: None,
