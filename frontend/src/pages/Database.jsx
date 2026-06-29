@@ -10,6 +10,8 @@ export default function DatabaseView() {
     { id: 'job_oauth_019', kind: 'pipeline', payload: '{"sync":"figma_tokens"}', status: 'failed', priority: 3 }
   ]);
 
+  const [formError, setFormError] = useState('');
+  const [formSuccess, setFormSuccess] = useState('');
   // Load custom entities from localStorage to support persistency in MVP
   const [customEntities, setCustomEntities] = useState([]);
   const [formModule, setFormModule] = useState('trading');
@@ -127,8 +129,9 @@ export default function DatabaseView() {
     let parsedAttrs = {};
     try {
       parsedAttrs = JSON.parse(formAttrs);
+      setFormError('');
     } catch (err) {
-      alert("Invalid attributes JSON format.");
+      setFormError('Invalid JSON in attrs field.');
       return;
     }
 
@@ -164,7 +167,8 @@ export default function DatabaseView() {
       .then(data => console.log("[Database API] Saved on local server:", data))
       .catch(err => console.warn("[Database API] Local server offline, saved locally only."));
 
-    alert("Entity created successfully!");
+    setFormSuccess(`Entity "${formTitle}" created.`);
+    setTimeout(() => setFormSuccess(''), 3000);
   };
 
   const selectedData = entityDefinitions[selectedEntity] || (customEntities.find(e => e.id === selectedEntity) ? {
@@ -179,20 +183,20 @@ export default function DatabaseView() {
   return (
     <div className="flex flex-col gap-8">
       {/* Introduction Banner */}
-      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-neo-surface flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="neo-title-md mb-2 flex items-center gap-2">
-            <DbIcon size={24} className="text-[var(--neo-blue)]" />
+            <DbIcon size={24} className="text-neo-blue" />
             The Notion Killer: One Generic Table
           </h2>
-          <p className="neo-body-md text-[var(--neo-text-muted)]">
+          <p className="neo-body-md text-neo-text-muted">
             Life OS stores all domain models in a single, indexable, multi-tenant <strong>entities</strong> table. New domains require <strong>zero database migrations</strong>.
           </p>
         </div>
         <div className={`neo-tag text-xs font-mono font-bold flex items-center gap-1.5 ${
-          apiStatus === 'online' ? 'bg-[var(--neo-mint)]' : 'bg-[var(--neo-red)] text-white'
+          apiStatus === 'online' ? 'bg-neo-mint' : 'bg-neo-red text-white'
         }`}>
-          <div className={`w-2.5 h-2.5 rounded-full ${apiStatus === 'online' ? 'bg-black animate-pulse' : 'bg-white'}`} />
+          <div className={`w-2.5 h-2.5 rounded-full ${apiStatus === 'online' ? 'bg-black animate-pulse' : 'bg-neo-surface'}`} />
           <span>Local API: {apiStatus.toUpperCase()}</span>
         </div>
       </div>
@@ -201,19 +205,19 @@ export default function DatabaseView() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Core Database Columns */}
-        <div className="lg:col-span-4 neo-surface neo-border-thick neo-shadow p-5 bg-white">
-          <h3 className="neo-title-md border-b-2 border-[var(--neo-border)] pb-3 mb-4 flex items-center gap-2">
+        <div className="lg:col-span-4 neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+          <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4 flex items-center gap-2">
             <Type size={18} />
             `entities` Schema
           </h3>
           <div className="flex flex-col gap-3">
             {entitiesSchema.map((col, idx) => (
-              <div key={idx} className="p-3 bg-[var(--neo-surface-muted)] neo-border flex justify-between items-center gap-4">
+              <div key={idx} className="p-3 bg-neo-surface-muted neo-border flex justify-between items-center gap-4">
                 <div>
-                  <span className="neo-label-md font-mono text-[var(--neo-blue)]">{col.name}</span>
-                  <p className="text-xs text-[var(--neo-text-muted)] mt-1">{col.desc}</p>
+                  <span className="neo-label-md font-mono text-neo-blue">{col.name}</span>
+                  <p className="text-xs text-neo-text-muted mt-1">{col.desc}</p>
                 </div>
-                <span className="neo-label-sm bg-white neo-border px-1.5 py-0.5 text-[10px]">{col.type}</span>
+                <span className="neo-label-sm bg-neo-surface neo-border px-1.5 py-0.5 text-[10px]">{col.type}</span>
               </div>
             ))}
           </div>
@@ -221,8 +225,8 @@ export default function DatabaseView() {
 
         {/* Dynamic Mapping Playground & Custom Entities Form */}
         <div className="lg:col-span-8 flex flex-col gap-6">
-          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-white">
-            <h3 className="neo-title-md border-b-2 border-[var(--neo-border)] pb-3 mb-4">
+          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+            <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4">
               Row Translator & Live Viewer
             </h3>
             
@@ -233,7 +237,7 @@ export default function DatabaseView() {
                   key={type}
                   onClick={() => setSelectedEntity(type)}
                   className={`neo-btn py-1.5 px-3 neo-label-sm ${
-                    selectedEntity === type ? 'bg-[var(--neo-yellow)]' : 'bg-white'
+                    selectedEntity === type ? 'bg-neo-yellow' : 'bg-neo-surface'
                   }`}
                 >
                   {type.toUpperCase()} (SEED)
@@ -245,7 +249,7 @@ export default function DatabaseView() {
                   key={ent.id}
                   onClick={() => setSelectedEntity(ent.id)}
                   className={`neo-btn py-1.5 px-3 neo-label-sm ${
-                    selectedEntity === ent.id ? 'bg-[var(--neo-mint)]' : 'bg-white'
+                    selectedEntity === ent.id ? 'bg-neo-mint' : 'bg-neo-surface'
                   }`}
                 >
                   {ent.title.toUpperCase()} (CUSTOM)
@@ -256,7 +260,7 @@ export default function DatabaseView() {
             {/* Simulated Database Row */}
             {selectedData && (
               <div className="neo-border p-4 bg-gray-950 text-emerald-400 font-mono text-sm neo-radius overflow-x-auto shadow-inner">
-                <div className="text-xs text-gray-500 mb-2">// Simulated SQL row in entities table</div>
+                <div className="text-xs text-neo-text-muted mb-2">// Simulated SQL row in entities table</div>
                 <div><span className="text-pink-400">id</span>: "{selectedEntity.startsWith('ent_') ? selectedEntity : 'd3b07384-d113-4cd4'}"</div>
                 <div><span className="text-pink-400">workspace_id</span>: "personal_workspace"</div>
                 <div><span className="text-pink-400">module</span>: "{selectedData.module}"</div>
@@ -275,12 +279,12 @@ export default function DatabaseView() {
             {/* Linked Edges (Graph Layer) */}
             {selectedData && selectedData.edges && selectedData.edges.length > 0 && (
               <div className="mt-6">
-                <h4 className="neo-label-md mb-3 text-[var(--neo-text-muted)]">Cross-Domain Graph Edges (`edges` table)</h4>
+                <h4 className="neo-label-md mb-3 text-neo-text-muted">Cross-Domain Graph Edges (`edges` table)</h4>
                 <div className="flex flex-col gap-2">
                   {selectedData.edges.map((edge, idx) => (
-                    <div key={idx} className="flex items-center gap-3 p-2 bg-[var(--neo-surface-muted)] neo-border text-xs font-semibold">
+                    <div key={idx} className="flex items-center gap-3 p-2 bg-neo-surface-muted neo-border text-xs font-semibold">
                       <span className="neo-chip neo-chip--active py-0.5 text-[9px]">{selectedData.title}</span>
-                      <div className="flex items-center gap-1 text-[var(--neo-red)]">
+                      <div className="flex items-center gap-1 text-neo-red">
                         <Share2 size={12} />
                         <span className="font-mono">{edge.label}</span>
                       </div>
@@ -294,8 +298,8 @@ export default function DatabaseView() {
           </div>
 
           {/* Form to Add Entity */}
-          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-white">
-            <h3 className="neo-title-md border-b-2 border-black pb-3 mb-4 flex items-center gap-2">
+          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+            <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4 flex items-center gap-2">
               <Plus size={18} />
               Insert Live Row Entity
             </h3>
@@ -306,7 +310,7 @@ export default function DatabaseView() {
                 <select 
                   value={formModule} 
                   onChange={(e) => setFormModule(e.target.value)}
-                  className="p-2 neo-border bg-white text-xs font-semibold focus:outline-none"
+                  className="p-2 neo-border bg-neo-surface text-xs font-semibold focus:outline-none"
                 >
                   <option value="trading">trading</option>
                   <option value="tasks">tasks</option>
@@ -321,7 +325,7 @@ export default function DatabaseView() {
                   type="text" 
                   value={formType} 
                   onChange={(e) => setFormType(e.target.value)}
-                  className="p-2 neo-border bg-white text-xs font-mono"
+                  className="p-2 neo-border bg-neo-surface text-xs font-mono"
                 />
               </div>
 
@@ -331,7 +335,7 @@ export default function DatabaseView() {
                   type="text" 
                   value={formTitle} 
                   onChange={(e) => setFormTitle(e.target.value)}
-                  className="p-2 neo-border bg-white text-xs font-semibold"
+                  className="p-2 neo-border bg-neo-surface text-xs font-semibold"
                 />
               </div>
 
@@ -341,14 +345,20 @@ export default function DatabaseView() {
                   rows={4}
                   value={formAttrs} 
                   onChange={(e) => setFormAttrs(e.target.value)}
-                  className="p-2 neo-border bg-white text-xs font-mono"
+                  className="p-2 neo-border bg-neo-surface text-xs font-mono"
                 />
               </div>
 
+              {formError && (
+                <div className="md:col-span-2 px-3 py-2 bg-neo-red text-white text-xs font-bold neo-border">{formError}</div>
+              )}
+              {formSuccess && (
+                <div className="md:col-span-2 px-3 py-2 bg-neo-mint text-black text-xs font-bold neo-border">{formSuccess}</div>
+              )}
               <div className="md:col-span-2">
-                <button 
-                  type="submit" 
-                  className="neo-btn w-full bg-[var(--neo-mint)] py-2.5 px-4 font-bold uppercase text-xs"
+                <button
+                  type="submit"
+                  className="neo-btn w-full bg-neo-mint py-2.5 px-4 font-bold uppercase text-xs"
                 >
                   Create & Save Entity →
                 </button>
@@ -360,28 +370,28 @@ export default function DatabaseView() {
       </div>
 
       {/* Jobs Queue Section */}
-      <div className="neo-surface neo-border-thick neo-shadow p-5 bg-white">
-        <h3 className="neo-title-md border-b-2 border-black pb-3 mb-4">
+      <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+        <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4">
           Jobs Queue Manager (`jobs` table cloud ↔ Mac)
         </h3>
         <div className="flex flex-col gap-3">
           {jobs.map((job) => (
-            <div key={job.id} className="p-4 bg-[var(--neo-bg)] neo-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div key={job.id} className="p-4 bg-neo-bg neo-border flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
-                  <span className="neo-label-md font-mono text-xs text-[var(--neo-blue)]">{job.id}</span>
+                  <span className="neo-label-md font-mono text-xs text-neo-blue">{job.id}</span>
                   <span className="neo-chip py-0.5 text-[9px]">PRIORITY: {job.priority}</span>
                   <span className="neo-tag text-[9px]">kind: {job.kind}</span>
                 </div>
-                <code className="text-[10px] bg-white p-1 border font-mono block text-gray-600 truncate max-w-lg">
+                <code className="text-[10px] bg-neo-surface p-1 border font-mono block text-neo-text-muted truncate max-w-lg">
                   {job.payload}
                 </code>
               </div>
               <div className="flex items-center gap-3">
                 <span className={`text-[10px] px-1.5 py-0.5 neo-border font-bold uppercase ${
-                  job.status === 'done' ? 'bg-[var(--neo-mint)]' :
-                  job.status === 'running' ? 'bg-[var(--neo-yellow)]' :
-                  job.status === 'failed' ? 'bg-[var(--neo-red)] text-white' : 'bg-white'
+                  job.status === 'done' ? 'bg-neo-mint' :
+                  job.status === 'running' ? 'bg-neo-yellow' :
+                  job.status === 'failed' ? 'bg-neo-red text-white' : 'bg-neo-surface'
                 }`}>
                   {job.status}
                 </span>
@@ -389,7 +399,7 @@ export default function DatabaseView() {
                   <button 
                     onClick={() => triggerJobRun(job.id)}
                     disabled={job.status === 'running'}
-                    className="neo-btn py-1 px-3 bg-white text-xs font-bold flex items-center gap-1.5"
+                    className="neo-btn py-1 px-3 bg-neo-surface text-xs font-bold flex items-center gap-1.5"
                   >
                     {job.status === 'running' ? <RefreshCw className="animate-spin" size={12} /> : <Play size={12} />}
                     {job.status === 'running' ? 'Running' : 'Trigger'}

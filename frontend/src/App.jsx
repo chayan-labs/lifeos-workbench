@@ -5,11 +5,12 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Database from './pages/Database';
 import Modules from './pages/Modules';
-import SelfExtension from './pages/SelfExtension';
-import HarnessLoop from './pages/HarnessLoop';
-import VcsIngest from './pages/VcsIngest';
+import Knowledge from './pages/Knowledge';
+import Harness from './pages/Harness';
+import Storage from './pages/Storage';
 import Integrations from './pages/Integrations';
 import DocsHub from './pages/DocsHub';
+import Profile from './pages/Profile';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(
@@ -53,26 +54,26 @@ export default function App() {
           }
         />
         <Route
-          path="/self-extension"
+          path="/knowledge"
           element={
             <Layout onLogout={handleLogout}>
-              <SelfExtension />
+              <Knowledge />
             </Layout>
           }
         />
         <Route
-          path="/harness-loop"
+          path="/harness"
           element={
             <Layout onLogout={handleLogout}>
-              <HarnessLoop />
+              <Harness />
             </Layout>
           }
         />
         <Route
-          path="/vcs-ingest"
+          path="/storage"
           element={
             <Layout onLogout={handleLogout}>
-              <VcsIngest />
+              <Storage />
             </Layout>
           }
         />
@@ -93,23 +94,19 @@ export default function App() {
           }
         />
         <Route
-          path="/docs_hub"
+          path="/profile"
           element={
             <Layout onLogout={handleLogout}>
-              <DocsHub />
+              <Profile />
             </Layout>
           }
         />
-        <Route
-          path="/docs-hub"
-          element={
-            <Layout onLogout={handleLogout}>
-              <DocsHub />
-            </Layout>
-          }
-        />
-        
-        {/* Redirects */}
+        {/* Back-compat redirects for the pre-merge IA */}
+        <Route path="/self-extension" element={<Navigate to="/harness" replace />} />
+        <Route path="/agent-harness" element={<Navigate to="/harness" replace />} />
+        <Route path="/harness-loop" element={<Navigate to="/harness" replace />} />
+        <Route path="/repository" element={<Navigate to="/storage" replace />} />
+        <Route path="/vcs-ingest" element={<Navigate to="/storage" replace />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

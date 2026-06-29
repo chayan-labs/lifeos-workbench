@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Settings, ShieldCheck, Key, RefreshCw, Layers, ArrowRight, Plus, X, Globe, User } from 'lucide-react';
+import { Settings, ShieldCheck, Key, RefreshCw, Layers, ArrowRight, Plus, X, Globe, User, Check } from 'lucide-react';
+import APIExplorer from '../components/APIExplorer';
 
 export default function Integrations() {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [refreshingProvider, setRefreshingProvider] = useState(null);
   const [selectedProvider, setSelectedProvider] = useState('google');
   const [handleInput, setHandleInput] = useState('');
   const [providers, setProviders] = useState([
@@ -30,13 +32,13 @@ export default function Integrations() {
   return (
     <div className="flex flex-col gap-8">
       {/* Introduction Card */}
-      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-white">
+      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-neo-surface">
         <h2 className="neo-title-md mb-2 flex items-center gap-2">
-          <ShieldCheck size={24} className="text-[var(--neo-mint)]" />
+          <ShieldCheck size={24} className="text-neo-mint" />
           Secure Integration Architecture: Nango Proxy Vault
         </h2>
-        <p className="neo-body-md text-[var(--neo-text-muted)]">
-          <strong>Hard Rule: No OAuth tokens are ever injected into the agent context.</strong> Integrations are handled by a self-hosted <strong>Nango</strong> vault. The agent only reads and writes a public <code className="bg-zinc-100 px-1 py-0.5 border text-pink-600 font-mono">connectionId</code>, while the local API server proxies network requests, injecting OAuth keys automatically at call-time.
+        <p className="neo-body-md text-neo-text-muted">
+          <strong>Hard Rule: No OAuth tokens are ever injected into the agent context.</strong> Integrations are handled by a self-hosted <strong>Nango</strong> vault. The agent only reads and writes a public <code className="bg-neo-surface-high px-1 py-0.5 neo-border text-neo-blue font-mono">connectionId</code>, while the local API server proxies network requests, injecting OAuth keys automatically at call-time.
         </p>
       </div>
 
@@ -44,15 +46,15 @@ export default function Integrations() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Connection List */}
-        <div className="lg:col-span-7 neo-surface neo-border-thick neo-shadow p-5 bg-white">
-          <div className="flex justify-between items-center border-b-2 border-[var(--neo-border)] pb-3 mb-4">
+        <div className="lg:col-span-7 neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+          <div className="flex justify-between items-center border-b-2 border-neo-border pb-3 mb-4">
             <h3 className="neo-title-md flex items-center gap-2">
               <Key size={18} />
               OAuth Credentials Vault
             </h3>
             <button 
               onClick={() => setShowAddModal(true)} 
-              className="neo-btn py-1 px-2.5 bg-[var(--neo-yellow)] text-xs font-bold flex items-center gap-1"
+              className="neo-btn py-1 px-2.5 bg-neo-yellow text-xs font-bold flex items-center gap-1"
             >
               <Plus size={12} /> Add Connection
             </button>
@@ -60,11 +62,11 @@ export default function Integrations() {
           
           <div className="flex flex-col gap-4">
             {providers.map((prov, idx) => (
-              <div key={idx} className="p-4 bg-[var(--neo-bg)] neo-border flex flex-col gap-3">
+              <div key={idx} className="p-4 bg-neo-bg neo-border flex flex-col gap-3">
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="neo-title-md text-sm">{prov.name}</span>
-                    <span className="text-xs font-mono text-[var(--neo-text-muted)] block mt-1">{prov.handle}</span>
+                    <span className="text-xs font-mono text-neo-text-muted block mt-1">{prov.handle}</span>
                   </div>
                   <span className="neo-chip neo-chip--completed py-0.5 text-[9px]">{prov.status}</span>
                 </div>
@@ -75,11 +77,18 @@ export default function Integrations() {
                   ))}
                 </div>
 
-                <div className="pt-2 border-t border-[var(--neo-border)] border-dashed text-xs flex justify-between items-center text-[var(--neo-text-muted)] font-mono">
+                <div className="pt-2 border-t border-neo-border border-dashed text-xs flex justify-between items-center text-neo-text-muted font-mono">
                   <span>Token Refreshed: {prov.sync}</span>
-                  <button className="neo-btn py-1 px-2.5 bg-white text-[10px] font-bold text-[var(--neo-text)] flex items-center gap-1">
-                    <RefreshCw size={10} /> Force Refresh
-                  </button>
+                  {refreshingProvider === prov.name ? (
+                    <span className="text-[10px] text-neo-mint font-bold flex items-center gap-1"><Check size={10} /> Refreshed</span>
+                  ) : (
+                    <button
+                      onClick={() => { setRefreshingProvider(prov.name); setTimeout(() => setRefreshingProvider(null), 2000); }}
+                      className="neo-btn py-1 px-2.5 bg-neo-surface text-[10px] font-bold text-neo-text flex items-center gap-1"
+                    >
+                      <RefreshCw size={10} /> Force Refresh
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -88,42 +97,42 @@ export default function Integrations() {
 
         {/* Nango Security Flow Diagram */}
         <div className="lg:col-span-5 flex flex-col gap-6">
-          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-white flex-1 flex flex-col gap-4">
-            <h3 className="neo-title-md border-b-2 border-[var(--neo-border)] pb-3 flex items-center gap-2">
-              <Layers size={18} className="text-[var(--neo-blue)]" />
+          <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface flex-1 flex flex-col gap-4">
+            <h3 className="neo-title-md border-b-2 border-neo-border pb-3 flex items-center gap-2">
+              <Layers size={18} className="text-neo-blue" />
               API Proxy Flow
             </h3>
             
             <div className="flex flex-col gap-4 text-xs font-mono">
-              <div className="p-3 bg-[var(--neo-surface-muted)] neo-border">
-                <span className="font-bold text-[var(--neo-blue)]">Step 1: Agent Action</span>
+              <div className="p-3 bg-neo-surface-muted neo-border">
+                <span className="font-bold text-neo-blue">Step 1: Agent Action</span>
                 <p className="mt-1 font-sans text-xs">Agent wants to read Twitter feed. Calls local curl tool with connectionId only.</p>
-                <code className="text-[10px] text-gray-500 block mt-2">curl "http://localhost/twitter/feed?con=con_x_091"</code>
+                <code className="text-[10px] text-neo-text-muted block mt-2">curl "http://localhost/twitter/feed?con=con_x_091"</code>
               </div>
 
               <div className="flex justify-center text-[var(--neo-border)]">
                 <ArrowRight className="rotate-90" size={18} />
               </div>
 
-              <div className="p-3 bg-[var(--neo-surface-muted)] neo-border">
-                <span className="font-bold text-[var(--neo-red)]">Step 2: Nango Proxy Decryption</span>
+              <div className="p-3 bg-neo-surface-muted neo-border">
+                <span className="font-bold text-neo-red">Step 2: Nango Proxy Decryption</span>
                 <p className="mt-1 font-sans text-xs">The API interceptor queries Nango database, decrypts the token, and attaches it as a header.</p>
-                <code className="text-[10px] text-gray-500 block mt-2">Headers: {`{ Authorization: "Bearer xyz_oauth_token" }`}</code>
+                <code className="text-[10px] text-neo-text-muted block mt-2">Headers: {`{ Authorization: "Bearer xyz_oauth_token" }`}</code>
               </div>
 
               <div className="flex justify-center text-[var(--neo-border)]">
                 <ArrowRight className="rotate-90" size={18} />
               </div>
 
-              <div className="p-3 bg-[var(--neo-surface-muted)] neo-border">
-                <span className="font-bold text-[var(--neo-mint)]">Step 3: Provider Response</span>
+              <div className="p-3 bg-neo-surface-muted neo-border">
+                <span className="font-bold text-neo-mint">Step 3: Provider Response</span>
                 <p className="mt-1 font-sans text-xs">Twitter API receives valid request and sends back data payload. Token is stripped from output logs.</p>
               </div>
             </div>
 
-            <div className="mt-auto p-3 bg-yellow-50 border border-[var(--neo-yellow)] neo-radius text-xs">
+            <div className="mt-auto p-3 bg-neo-surface-high border border-[var(--neo-yellow)] neo-radius text-xs">
               <span className="font-bold block mb-1">Custom API Connectors:</span>
-              <p className="text-[11px] text-[var(--neo-text-muted)]">
+              <p className="text-[11px] text-neo-text-muted">
                 Kite Trading API (Zerodha) and WhatsApp Business Cloud use standard envelope-encrypted DB tables instead of Nango OAuth vaults.
               </p>
             </div>
@@ -132,10 +141,13 @@ export default function Integrations() {
 
       </div>
 
+      {/* Full system API surface */}
+      <APIExplorer />
+
       {/* Add Connection Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="neo-surface neo-border-thick shadow-[8px_8px_0_0_#1c1c0f] p-6 bg-white max-w-md w-full relative">
+          <div className="neo-surface neo-border-thick shadow-[8px_8px_0_0_#1c1c0f] p-6 bg-neo-surface max-w-md w-full relative">
             <button 
               onClick={() => setShowAddModal(false)}
               className="absolute right-4 top-4 neo-icon-btn p-1.5"
@@ -149,7 +161,7 @@ export default function Integrations() {
                 <select 
                   value={selectedProvider} 
                   onChange={(e) => setSelectedProvider(e.target.value)}
-                  className="neo-input w-full bg-white cursor-pointer"
+                  className="neo-input w-full bg-neo-surface cursor-pointer"
                 >
                   <option value="google">Google Workspace (Gmail/Calendar)</option>
                   <option value="notion">Notion Developer Portal</option>
@@ -169,13 +181,13 @@ export default function Integrations() {
                 />
               </div>
 
-              <div className="p-3 bg-yellow-50 border border-[var(--neo-yellow)] text-[11px]">
+              <div className="p-3 bg-neo-surface-high border border-[var(--neo-yellow)] text-[11px]">
                 <strong>Nango callback URL:</strong> Ready. Click AUTHORIZE to boot the local electron OAuth flow wrapper.
               </div>
 
               <button 
                 onClick={handleAddConnection}
-                className="neo-btn bg-[var(--neo-yellow)] py-3 px-4 neo-label-md mt-2"
+                className="neo-btn bg-neo-yellow py-3 px-4 neo-label-md mt-2"
               >
                 AUTHORIZE SECURE CONNECTION
               </button>

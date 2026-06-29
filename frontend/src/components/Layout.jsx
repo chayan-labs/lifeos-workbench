@@ -1,42 +1,99 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import BrandMark from './BrandMark';
-import { 
-  LayoutDashboard, 
-  Database, 
-  Cpu, 
-  Settings, 
-  History, 
-  Zap, 
-  Globe, 
-  Menu, 
-  X, 
-  FileCode,
+import AIConsole from './AIConsole';
+import { ensureBaseline } from '../lib/vcs';
+import {
+  LayoutDashboard,
+  Database,
+  Cpu,
+  Settings,
+  Menu,
+  X,
   Terminal,
   FileText,
-  LogOut
+  LogOut,
+  Moon,
+  Sun,
+  FolderGit2,
+  Boxes,
+  Compass,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
+    localStorage.getItem('life_os_sidebar_collapsed') === 'true'
+  );
 
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Unified Database', href: '/database', icon: Database },
-    { name: 'Seed Modules', href: '/modules', icon: Cpu },
-    { name: 'Self-Extension', href: '/self-extension', icon: Zap },
-    { name: 'Harness Loop', href: '/harness-loop', icon: History },
-    { name: 'VCS & Media Ingest', href: '/vcs-ingest', icon: FileCode },
-    { name: 'Integrations', href: '/integrations', icon: Settings },
-    { name: 'System Docs', href: '/docs', icon: FileText },
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('life_os_theme');
+    if (savedTheme === 'dark') {
+      setIsDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+    // Seal the current state as the protected baseline commit on first run.
+    ensureBaseline();
+  }, []);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('life_os_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
+
+  const toggleTheme = () => {
+    if (isDarkMode) {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('life_os_theme', 'light');
+      setIsDarkMode(false);
+    } else {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('life_os_theme', 'dark');
+      setIsDarkMode(true);
+    }
+  };
+
+  // Grouped, compressed IA. Self-Extension + Agent Harness + Harness Loop are
+  // merged into Harness; Repository + VCS/Media Ingest into Storage.
+  const navGroups = [
+    {
+      group: 'Workspace',
+      items: [
+        { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+        { name: 'Knowledge', href: '/knowledge', icon: Compass },
+        { name: 'Modules', href: '/modules', icon: Cpu },
+        { name: 'Database', href: '/database', icon: Database },
+      ],
+    },
+    {
+      group: 'Build',
+      items: [
+        { name: 'Harness', href: '/harness', icon: Boxes },
+        { name: 'Storage & VCS', href: '/storage', icon: FolderGit2 },
+      ],
+    },
+    {
+      group: 'System',
+      items: [
+        { name: 'Integrations', href: '/integrations', icon: Settings },
+        { name: 'Docs', href: '/docs', icon: FileText },
+      ],
+    },
   ];
+  const navigation = navGroups.flatMap((g) => g.items);
 
   const isActive = (path) => location.pathname === path;
   const activeLabel = navigation.find((item) => isActive(item.href))?.name || 'Overview';
 
   return (
-    <div className="min-h-screen neo-bg text-[var(--neo-text)] flex">
+    <div className="min-h-screen neo-bg text-neo-text flex">
       {/* Mobile Drawer Menu */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
@@ -51,30 +108,35 @@ export default function Layout({ children, onLogout }) {
               <BrandMark className="w-20 h-20" />
               <div>
                 <div className="neo-title-md leading-none">Life OS</div>
-                <div className="neo-label-sm text-[var(--neo-text-muted)] mt-1">Agentic Personal OS</div>
+                <div className="neo-label-sm text-neo-text-muted mt-1">Agentic Personal OS</div>
               </div>
             </div>
 
-            <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-              {navigation.map((item) => (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 neo-label-md transition-all border-2 ${
-                    isActive(item.href)
-                      ? 'bg-[var(--neo-blue)] text-white border-[var(--neo-border)] neo-shadow'
-                      : 'text-[var(--neo-text)] border-transparent hover:bg-[var(--neo-surface-high)] hover:border-[var(--neo-border)] neo-shadow-hover'
-                  }`}
-                >
-                  <item.icon size={20} />
-                  {item.name}
-                </Link>
+            <nav className="flex-1 px-4 py-4 space-y-4 overflow-y-auto">
+              {navGroups.map((g) => (
+                <div key={g.group} className="space-y-2">
+                  <div className="neo-label-sm text-neo-text-muted text-[10px] px-1">{g.group}</div>
+                  {g.items.map((item) => (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-3 neo-label-md transition-all border-2 ${
+                        isActive(item.href)
+                          ? 'bg-neo-blue text-white border-neo-border neo-shadow'
+                          : 'text-neo-text border-transparent hover:bg-neo-surface-high hover:border-neo-border neo-shadow-hover'
+                      }`}
+                    >
+                      <item.icon size={20} />
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
               ))}
             </nav>
 
-            <div className="px-4 py-6 mt-auto border-t-2 border-[var(--neo-border)] flex flex-col gap-2">
-              <div className="text-center neo-label-sm text-[var(--neo-text-muted)]">
+            <div className="px-4 py-6 mt-auto border-t-2 border-neo-border flex flex-col gap-2">
+              <div className="text-center neo-label-sm text-neo-text-muted">
                 Local Trusted Host (Mac OS)
               </div>
               <div className="flex items-center gap-2 justify-center neo-tag">
@@ -87,41 +149,70 @@ export default function Layout({ children, onLogout }) {
       )}
 
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:flex-col w-[280px] neo-surface neo-border-thick border-r-4 border-[var(--neo-border)] shadow-[4px_0px_0px_0px_#1c1c0f]">
-        <div className="px-6 py-8 neo-divider flex flex-col items-center gap-4 text-center">
-          <BrandMark className="w-24 h-24" />
-          <div>
-            <div className="neo-title-lg leading-none">Life OS</div>
-            <div className="neo-label-sm text-[var(--neo-text-muted)] mt-2">Agentic Personal OS</div>
-          </div>
+      <aside
+        className={`hidden md:flex md:flex-col neo-surface neo-border-thick border-r-4 border-neo-border shadow-[4px_0px_0px_0px_#1c1c0f] transition-[width] duration-200 ${
+          isSidebarCollapsed ? 'w-16' : 'w-52'
+        }`}
+      >
+        <div className={`px-3 py-3 neo-divider flex items-center gap-3 ${isSidebarCollapsed ? 'justify-center' : ''}`}>
+          <BrandMark className="w-9 h-9 shrink-0" />
+          {!isSidebarCollapsed && (
+            <div>
+              <div className="neo-title-md text-sm leading-none">Life OS</div>
+              <div className="neo-label-sm text-neo-text-muted text-[9px] mt-0.5">Agentic Personal OS</div>
+            </div>
+          )}
         </div>
 
-        <nav className="flex-1 px-4 py-6 space-y-3">
-          {navigation.map((item) => (
-            <Link
-              key={item.name}
-              to={item.href}
-              className={`flex items-center gap-3 px-4 py-3 neo-label-md transition-all border-2 ${
-                isActive(item.href)
-                  ? 'bg-[var(--neo-blue)] text-white border-[var(--neo-border)] neo-shadow'
-                  : 'text-[var(--neo-text)] border-transparent hover:bg-[var(--neo-surface-high)] hover:border-[var(--neo-border)] neo-shadow-hover'
-              }`}
-            >
-              <item.icon size={20} />
-              {item.name}
-            </Link>
+        <button
+          onClick={toggleSidebar}
+          className={`mx-2 mt-2 neo-icon-btn neo-radius-none p-1.5 flex items-center justify-center ${
+            isSidebarCollapsed ? '' : 'self-end'
+          }`}
+          aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+
+        <nav className="flex-1 px-2 py-2 flex flex-col gap-2 overflow-y-auto">
+          {navGroups.map((g) => (
+            <div key={g.group} className="flex flex-col gap-0.5">
+              {!isSidebarCollapsed && (
+                <div className="neo-label-sm text-neo-text-muted text-[9px] px-2 pt-1 pb-0.5">{g.group}</div>
+              )}
+              {g.items.map((item) => (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  title={isSidebarCollapsed ? item.name : undefined}
+                  className={`flex items-center gap-2 px-3 py-2 neo-label-sm text-[11px] transition-all border-2 ${
+                    isSidebarCollapsed ? 'justify-center' : ''
+                  } ${
+                    isActive(item.href)
+                      ? 'bg-neo-blue text-white border-neo-border neo-shadow'
+                      : 'text-neo-text border-transparent hover:bg-neo-surface-high hover:border-neo-border'
+                  }`}
+                >
+                  <item.icon size={14} className="shrink-0" />
+                  {!isSidebarCollapsed && <span className="truncate">{item.name}</span>}
+                </Link>
+              ))}
+            </div>
           ))}
         </nav>
 
-        <div className="px-4 py-6 mt-auto border-t-2 border-[var(--neo-border)] flex flex-col gap-2">
-          <div className="text-center neo-label-sm text-[var(--neo-text-muted)]">
-            Local Trusted Host (Mac OS)
+        {!isSidebarCollapsed && (
+          <div className="px-3 py-3 mt-auto border-t-2 border-neo-border flex flex-col gap-1.5">
+            <div className="neo-label-sm text-neo-text-muted text-[9px]">
+              Local Trusted Host (Mac OS)
+            </div>
+            <div className="flex items-center gap-1.5 neo-tag text-[9px] px-2 py-1">
+              <Terminal size={10} />
+              <span>ONLINE: 127.0.0.1</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 justify-center neo-tag">
-            <Terminal size={14} />
-            <span>ONLINE: 127.0.0.1</span>
-          </div>
-        </div>
+        )}
       </aside>
 
       {/* Main Content Area */}
@@ -136,27 +227,44 @@ export default function Layout({ children, onLogout }) {
               {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
             <h1 className="neo-title-md hidden md:block">{activeLabel}</h1>
-            <span className="neo-tag bg-[var(--neo-yellow)] hidden lg:inline-flex">SAAS-READY</span>
+            <span className="neo-tag bg-neo-yellow hidden lg:inline-flex">SAAS-READY</span>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 neo-border bg-[var(--neo-mint)] neo-shadow-sm neo-label-sm">
+            <div className="flex items-center gap-2 px-3 py-1.5 neo-border bg-neo-mint neo-shadow-sm neo-label-sm">
               <div className="w-2.5 h-2.5 rounded-full bg-[var(--neo-text)] animate-pulse" />
               <span>Turso replica synced</span>
             </div>
             
             <button
+              onClick={toggleTheme}
+              className="neo-btn p-2 bg-neo-surface-high hover:bg-neo-yellow flex items-center justify-center transition-colors"
+              title="Toggle Theme"
+            >
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            
+            <button
               onClick={onLogout}
-              className="neo-btn p-2 bg-[var(--neo-red)] text-white hover:bg-[var(--neo-red)]/90 flex items-center gap-1 text-xs font-mono font-bold"
+              className="neo-btn p-2 bg-neo-red text-white hover:bg-neo-red/90 flex items-center gap-1 text-xs font-mono font-bold"
               title="Logout session"
             >
               <LogOut size={16} />
               <span className="hidden sm:inline">LOGOUT</span>
             </button>
             
-            <div className="w-10 h-10 neo-border neo-shadow bg-[var(--neo-yellow)] flex items-center justify-center font-bold">
-              LO
-            </div>
+            <Link
+              to="/profile"
+              title="Profile & account"
+              className="w-10 h-10 neo-border neo-shadow bg-neo-yellow flex items-center justify-center font-bold text-neo-text hover:bg-neo-mint transition-colors"
+            >
+              {(localStorage.getItem('life_os_user_name') || 'LO')
+                .split(' ')
+                .map((p) => p[0])
+                .join('')
+                .slice(0, 2)
+                .toUpperCase()}
+            </Link>
           </div>
         </header>
 
@@ -164,6 +272,9 @@ export default function Layout({ children, onLogout }) {
           {children}
         </div>
       </main>
+
+      {/* App-wide AI surface - reachable from every page */}
+      <AIConsole />
     </div>
   );
 }

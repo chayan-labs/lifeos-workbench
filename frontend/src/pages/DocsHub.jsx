@@ -248,12 +248,12 @@ export default function DocsHub() {
   return (
     <div className="flex flex-col gap-6">
       {/* Header Info */}
-      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-[var(--neo-yellow)]">
-        <h2 className="neo-title-lg text-black mb-1.5 flex items-center gap-2">
+      <div className="neo-surface neo-border-thick neo-shadow p-6 bg-neo-yellow">
+        <h2 className="neo-title-lg text-neo-text mb-1.5 flex items-center gap-2">
           <BookOpen size={28} />
           System Specifications Portal
         </h2>
-        <p className="neo-body-md text-black font-semibold">
+        <p className="neo-body-md text-neo-text font-semibold">
           Comprehensive guides, architecture topologies, and sandbox security parameters for the Life OS environment.
         </p>
       </div>
@@ -262,7 +262,7 @@ export default function DocsHub() {
         
         {/* Left Document Selector (Level 1 Nav) */}
         <div className="lg:col-span-3 flex flex-col gap-2">
-          <span className="neo-label-sm text-[var(--neo-text-muted)] text-[10px] px-1">DOCUMENT SPECIFICATIONS</span>
+          <span className="neo-label-sm text-neo-text-muted text-[10px] px-1">DOCUMENT SPECIFICATIONS</span>
           <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
             {Object.keys(documentationData).map((key) => {
               const doc = documentationData[key];
@@ -272,14 +272,14 @@ export default function DocsHub() {
                   key={key}
                   onClick={() => handleDocSelect(key)}
                   className={`neo-btn text-left p-3 flex items-center justify-between transition-all ${
-                    selectedDocId === key ? 'bg-[var(--neo-yellow)] neo-shadow' : 'bg-white'
+                    selectedDocId === key ? 'bg-neo-yellow neo-shadow' : 'bg-neo-surface'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <Icon size={14} className="shrink-0 text-black" />
+                    <Icon size={14} className="shrink-0 text-neo-text" />
                     <span className="neo-label-md text-xs truncate block">{doc.title}</span>
                   </div>
-                  <ChevronRight size={12} className="shrink-0 text-black" />
+                  <ChevronRight size={12} className="shrink-0 text-neo-text" />
                 </button>
               );
             })}
@@ -288,16 +288,16 @@ export default function DocsHub() {
 
         {/* Middle Table of Contents (Level 2 Nav) */}
         <div className="lg:col-span-3 flex flex-col gap-2">
-          <span className="neo-label-sm text-[var(--neo-text-muted)] text-[10px] px-1">SECTIONS IN THIS DOC</span>
-          <div className="flex flex-col gap-2 bg-white p-3 neo-border neo-radius min-h-[160px]">
+          <span className="neo-label-sm text-neo-text-muted text-[10px] px-1">SECTIONS IN THIS DOC</span>
+          <div className="flex flex-col gap-2 bg-neo-surface p-3 neo-border neo-radius min-h-[160px]">
             {selectedDoc.subsections.map((sub) => (
               <button
                 key={sub.id}
                 onClick={() => setActiveSubSection(sub.id)}
                 className={`text-left py-1.5 px-2.5 text-xs font-mono transition-all border-l-2 ${
                   activeSubSection === sub.id
-                    ? 'border-[var(--neo-blue)] text-[var(--neo-blue)] font-bold bg-[var(--neo-surface-muted)]'
-                    : 'border-transparent text-[var(--neo-text-muted)] hover:text-black'
+                    ? 'border-[var(--neo-blue)] text-neo-blue font-bold bg-neo-surface-muted'
+                    : 'border-transparent text-neo-text-muted hover:text-neo-text'
                 }`}
               >
                 {sub.title}
@@ -308,12 +308,12 @@ export default function DocsHub() {
 
         {/* Right Main Text Content Pane */}
         <div className="lg:col-span-6">
-          <div className="neo-surface neo-border-thick neo-shadow p-6 bg-white min-h-[400px] flex flex-col justify-between">
+          <div className="neo-surface neo-border-thick neo-shadow p-6 bg-neo-surface min-h-[400px] flex flex-col justify-between">
             <div>
-              <div className="border-b-2 border-black pb-3 mb-4">
+              <div className="border-b-2 border-neo-border pb-3 mb-4">
                 <span className="neo-chip neo-chip--completed text-[9px] mb-2">READING INDEX</span>
                 <h3 className="neo-title-md text-sm">{selectedDoc.title}</h3>
-                <p className="text-xs text-[var(--neo-text-muted)] mt-1.5 font-semibold leading-relaxed">
+                <p className="text-xs text-neo-text-muted mt-1.5 font-semibold leading-relaxed">
                   {selectedDoc.intro}
                 </p>
               </div>
@@ -322,20 +322,20 @@ export default function DocsHub() {
               <div className="mt-4">
                 {selectedDoc.subsections.find(s => s.id === activeSubSection) ? (
                   <div className="flex flex-col gap-3">
-                    <h4 className="neo-label-md text-xs text-[var(--neo-blue)] border-b border-black border-dashed pb-1.5">
+                    <h4 className="neo-label-md text-xs text-neo-blue border-b border-neo-border border-dashed pb-1.5">
                       {selectedDoc.subsections.find(s => s.id === activeSubSection).title}
                     </h4>
-                    <p className="text-xs leading-relaxed text-[var(--neo-text-muted)] font-semibold whitespace-pre-wrap">
+                    <p className="text-xs leading-relaxed text-neo-text-muted font-semibold whitespace-pre-wrap">
                       {selectedDoc.subsections.find(s => s.id === activeSubSection).body}
                     </p>
                   </div>
                 ) : (
-                  <p className="text-xs text-[var(--neo-text-muted)]">Select a subsection to inspect the details.</p>
+                  <p className="text-xs text-neo-text-muted">Select a subsection to inspect the details.</p>
                 )}
               </div>
             </div>
 
-            <div className="mt-8 pt-3 border-t border-gray-200 text-[9px] font-mono text-[var(--neo-text-muted)] flex justify-between">
+            <div className="mt-8 pt-3 border-t border-neo-border text-[9px] font-mono text-neo-text-muted flex justify-between">
               <span>Scope: docs/{selectedDocId}.md</span>
               <span>Classification: capabilities</span>
             </div>
