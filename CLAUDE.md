@@ -43,3 +43,4 @@ Generalize `../../01_Inbox/knowledge-atlas/` (`app.js`, `annotations.js`, `intel
 ## Conventions
 - Conventional commits; no co-author trailers. Many small files (200-400 lines, 800 max), functions <50 lines, immutable patterns. Tests ≥80%, TDD. Light, minimalist UI palette.
 - Build is phased (README §"Build Order"); each phase independently usable, ships with tests + a commit.
+- **One commit per resolved GitHub issue.** After fully resolving an issue (implementation + tests passing), make a single conventional commit referencing it (e.g. `feat: full-spec 0001_core.sql data-plane migration (#1)`) before starting the next issue.
