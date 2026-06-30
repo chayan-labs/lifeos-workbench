@@ -10,6 +10,18 @@ export default function EntityDetailPanel({ entityId, onClose }) {
   const [edges, setEdges] = useState([]);
   const [events, setEvents] = useState([]);
   const [state, setState] = useState('loading'); // 'loading' | 'ready' | 'offline' | 'not_found'
+  const [linkTarget, setLinkTarget] = useState('');
+  const [linkRel, setLinkRel] = useState('relates_to');
+  const [linkError, setLinkError] = useState('');
+
+  const loadRelations = (id) => {
+    Promise.all([
+      apiCall('GET', `/api/edge?src_id=${id}`),
+      apiCall('GET', `/api/edge?dst_id=${id}`),
+    ]).then(([edgeSrc, edgeDst]) => {
+      setEdges([...(edgeSrc.data || []), ...(edgeDst.data || [])]);
+    });
+  };
 
   useEffect(() => {
     if (!entityId) return;
@@ -33,6 +45,26 @@ export default function EntityDetailPanel({ entityId, onClose }) {
 
     return () => { cancelled = true; };
   }, [entityId]);
+
+  const handleLink = (e) => {
+    e.preventDefault();
+    setLinkError('');
+    const target = linkTarget.trim();
+    if (!target) return;
+    // A target starting with "ent_" is treated as an internal entity id
+    // (dst_id); anything else (URL, external key) is an external dst_ref.
+    const body = { src_id: entityId, rel: linkRel.trim() || 'relates_to' };
+    if (target.startsWith('ent_')) body.dst_id = target; else body.dst_ref = target;
+
+    apiCall('POST', '/api/edge', body).then(({ ok, offline, error }) => {
+      if (ok && !offline) {
+        setLinkTarget('');
+        loadRelations(entityId);
+      } else {
+        setLinkError(offline ? 'Backend unreachable.' : (error || 'Failed to create edge.'));
+      }
+    });
+  };
 
   if (!entityId) return null;
 
@@ -80,6 +112,23 @@ export default function EntityDetailPanel({ entityId, onClose }) {
                   ))}
                 </div>
               )}
+
+              <form onSubmit={handleLink} className="flex gap-2 mt-3">
+                <input
+                  value={linkTarget}
+                  onChange={(e) => setLinkTarget(e.target.value)}
+                  placeholder="ent_... or external ref/URL"
+                  className="p-1.5 neo-border bg-neo-surface text-xs font-mono flex-1"
+                />
+                <input
+                  value={linkRel}
+                  onChange={(e) => setLinkRel(e.target.value)}
+                  placeholder="rel"
+                  className="p-1.5 neo-border bg-neo-surface text-xs font-mono w-28"
+                />
+                <button type="submit" className="neo-btn py-1.5 px-3 bg-neo-mint text-[10px] font-bold">Link</button>
+              </form>
+              {linkError && <p className="text-[10px] text-neo-red font-bold mt-1">{linkError}</p>}
             </div>
 
             <div>
