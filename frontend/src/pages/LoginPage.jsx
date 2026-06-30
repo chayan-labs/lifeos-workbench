@@ -40,8 +40,12 @@ export default function LoginPage({ onLogin }) {
   const handleLoginSubmit = (e) => {
     e.preventDefault();
     
-    // Check default personal login - relax strictness for easier testing
-    if ((email === 'chayan@lifeos.app' && password === 'password') || email.includes('chayan')) {
+    // Demo identity only. NOTE: matching must be an exact credential check -
+    // a substring match (e.g. email.includes('chayan')) would shadow any real
+    // registered user whose email contains the substring, trapping them in the
+    // default workspace and ignoring their key. Registered users fall through
+    // to the localStorage lookup below.
+    if (email === 'chayan@lifeos.app' && password === 'password') {
       localStorage.setItem('life_os_loggedin', 'true');
       localStorage.setItem('life_os_user_email', email);
       localStorage.setItem('life_os_user_name', 'Chayan Aggarwal');
@@ -87,20 +91,29 @@ export default function LoginPage({ onLogin }) {
     // Attempt registration against the local Axum Rust API. Soft-auth model:
     // there is no /api/login - /api/register is the only place a key_token is
     // minted, and it doubles as the password the demo login form accepts.
-    apiCall('POST', '/api/register', payload).then(({ ok, data, offline }) => {
-      if (ok && !offline) {
-        const newUser = {
+    apiCall('POST', '/api/register', payload).then(({ ok, data, error, offline }) => {
+      // Real backend success: the server minted the tenant + key_token.
+      if (ok && !offline && data && data.workspace_id && data.key_token) {
+        saveUserLocally({
           email: regEmail,
           name: regName,
           workspace_name: regWorkspace,
           workspace_id: data.workspace_id,
           key: data.key_token,
-        };
-        saveUserLocally(newUser);
+        });
         return;
       }
 
-      // Fallback locally if the Rust server is offline.
+      // A reachable backend that rejected the request (duplicate email,
+      // validation error, etc.) is NOT offline. Surface the real error instead
+      // of faking success and persisting a phantom tenant the server never minted.
+      if (!offline) {
+        setError(error || 'Registration failed. Please check your details and try again.');
+        return;
+      }
+
+      // Only fall back to a local mock workspace when the Rust server is truly
+      // unreachable, so the offline flow still works for local development.
       const mockWorkspaceId = 'ws_' + Math.random().toString(36).substring(2, 10);
       const mockKey = 'key_' + Math.random().toString(36).substring(2, 12);
       saveUserLocally({
