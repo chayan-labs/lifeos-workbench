@@ -26,7 +26,8 @@ import {
   PanelLeftOpen,
   GitBranch,
   Sparkles,
-  History
+  History,
+  Gauge
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -106,6 +107,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Knowledge', href: '/knowledge', icon: Compass },
         { name: 'Learning', href: '/m/learning', icon: Sparkles },
         { name: 'Coding', href: '/m/coding', icon: FolderGit2 },
+        { name: 'Trading', href: '/m/trading', icon: Gauge },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },

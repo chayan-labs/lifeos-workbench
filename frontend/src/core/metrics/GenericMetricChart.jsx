@@ -11,7 +11,16 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6'
 // events in, the declared `viz` (line/bar/funnel) out - no per-module chart
 // code. See docs/PLATFORM-SYSTEMS.md and core/metrics/computeMetric.js.
 export default function GenericMetricChart({ metric, events, height = 220 }) {
-  const data = computeMetric(events, metric);
+  let data = computeMetric(events, metric);
+
+  // `metric.cumulative: true` turns a per-bucket sum into a running total -
+  // e.g. an equity curve from per-day P&L (docs/MODULES.md §2.4 Trading).
+  // Still zero bespoke code per module: any manifest's bucketed metric can
+  // opt in with this one flag.
+  if (metric.cumulative) {
+    let running = 0;
+    data = data.map((d) => { running += d.value; return { ...d, value: running }; });
+  }
 
   if (!data.length) {
     return <p className="text-xs text-neo-text-muted">No data yet for "{metric.id}".</p>;

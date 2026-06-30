@@ -127,10 +127,61 @@ export const CODING_MANIFEST = {
   ],
 };
 
+// Trading is read-only for any agent/bot by hard architectural rule
+// (docs/SECURITY.md §1): there is no place/modify/cancel/GTT tool anywhere
+// in the closed ACTION_TOOLS registry (lib/agentActions.js), and
+// broker-guard fails closed on any such attempt at the hook layer. A
+// `proposed_order` is a draft-only entity; turning it into a real order
+// requires a separate, human-typed-confirmation executor that does not
+// exist in this app at all (Phase 6) - the manifest below has no tool, no
+// agentTool, and no button anywhere that could place one.
+export const TRADING_MANIFEST = {
+  id: 'trading',
+  name: 'Trading',
+  icon: '📈',
+  entityTypes: {
+    trade: {
+      label: 'Trade',
+      plural: 'Trades',
+      display: { title: (e) => `${e.attrs?.symbol || '?'} ${e.attrs?.side || ''}`, subtitle: 'status', badge: (e) => e.attrs?.r_multiple != null ? `R ${e.attrs.r_multiple}` : null },
+    },
+    setup: {
+      label: 'Setup / Playbook',
+      plural: 'Setups',
+      display: { title: 'title', subtitle: 'description' },
+    },
+    proposed_order: {
+      label: 'Proposed Order (draft only - never auto-executes)',
+      plural: 'Proposed Orders',
+      display: { title: (e) => `${e.attrs?.symbol || '?'} ${e.attrs?.side || ''} x${e.attrs?.qty || '?'}`, badge: 'status' },
+    },
+  },
+  views: [
+    { id: 'journal', label: 'Journal', kind: 'table', type: 'trade', columns: [
+      { key: 'symbol', label: 'Symbol' },
+      { key: 'side', label: 'Side' },
+      { key: 'entry', label: 'Entry' },
+      { key: 'exit', label: 'Exit' },
+      { key: 'stop', label: 'Stop' },
+      { key: 'target', label: 'Target' },
+      { key: 'r_multiple', label: 'R' },
+      { key: 'pnl', label: 'PnL' },
+      { key: 'emotion', label: 'Emotion', editable: true },
+    ] },
+    { id: 'setups', label: 'Setups', kind: 'list', type: 'setup' },
+    { id: 'proposed', label: 'Proposed Orders (approve in Telegram - never auto-runs)', kind: 'list', type: 'proposed_order' },
+    { id: 'equity', label: 'Equity Curve', kind: 'metric', metric: 'equity_curve' },
+  ],
+  metrics: [
+    { id: 'equity_curve', source: 'events', where: { type: 'trade.closed' }, agg: 'sum:pnl', bucket: 'day', viz: 'line', cumulative: true },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
   coding: CODING_MANIFEST,
+  trading: TRADING_MANIFEST,
 };
 
 export function getManifest(id) {

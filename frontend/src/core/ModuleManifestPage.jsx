@@ -6,6 +6,7 @@ import GenericBoard from './renderers/GenericBoard';
 import GenericCalendar from './renderers/GenericCalendar';
 import GenericDetail from './renderers/GenericDetail';
 import EntityDetailPanel from '../components/EntityDetailPanel';
+import GenericMetricChart from './metrics/GenericMetricChart';
 import { resolveField } from './renderers/displayHelpers';
 
 const KIND_RENDERERS = { list: GenericList, table: GenericTable, board: GenericBoard, calendar: GenericCalendar };
@@ -33,22 +34,35 @@ function applyFilter(entities, filter) {
 export default function ModuleManifestPage({ manifest }) {
   const [activeViewId, setActiveViewId] = useState(manifest.views[0]?.id);
   const [entities, setEntities] = useState([]);
+  const [events, setEvents] = useState([]);
   const [state, setState] = useState('loading');
   const [selectedId, setSelectedId] = useState(null);
 
   const view = manifest.views.find((v) => v.id === activeViewId) || manifest.views[0];
   const entityType = manifest.entityTypes[view?.type] || {};
+  // `kind: 'metric'` views chart raw events (manifest.metrics[view.metric])
+  // through GenericMetricChart instead of listing entities - e.g. an equity
+  // curve computed from trade.closed events (docs/MODULES.md §2.4).
+  const metric = view?.kind === 'metric' ? (manifest.metrics || []).find((m) => m.id === view.metric) : null;
 
   useEffect(() => {
     if (!view) return;
     setState('loading');
+    if (view.kind === 'metric') {
+      apiCall('GET', '/api/event?limit=2000').then(({ ok, data, offline }) => {
+        if (offline) { setState('offline'); return; }
+        setEvents(ok ? data || [] : []);
+        setState('ready');
+      });
+      return;
+    }
     apiCall('GET', `/api/entity?module=${encodeURIComponent(manifest.id)}&type=${encodeURIComponent(view.type)}&limit=500`)
       .then(({ ok, data, offline }) => {
         if (offline) { setState('offline'); return; }
         setEntities(ok ? data || [] : []);
         setState('ready');
       });
-  }, [manifest.id, view?.type]);
+  }, [manifest.id, view?.type, view?.kind]);
 
   const Renderer = KIND_RENDERERS[view?.kind] || GenericList;
   const viewEntities = applyFilter(entities, view?.filter);
@@ -80,10 +94,16 @@ export default function ModuleManifestPage({ manifest }) {
       <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
         {state === 'offline' && <p className="text-xs text-neo-red font-bold">Backend unreachable.</p>}
         {state === 'loading' && <p className="text-xs text-neo-text-muted">Loading…</p>}
+        {state === 'ready' && view?.kind === 'metric' && metric && (
+          <GenericMetricChart metric={metric} events={events} />
+        )}
+        {state === 'ready' && view?.kind === 'metric' && !metric && (
+          <p className="text-xs text-neo-text-muted">No metric named "{view.metric}" declared on this manifest.</p>
+        )}
         {state === 'ready' && view?.kind === 'table' && (
           <Renderer entities={viewEntities} setEntities={setEntities} columns={view.columns} onRowClick={(e) => setSelectedId(e.id)} />
         )}
-        {state === 'ready' && view?.kind !== 'table' && (
+        {state === 'ready' && view?.kind !== 'table' && view?.kind !== 'metric' && (
           <Renderer
             entities={viewEntities}
             setEntities={setEntities}
