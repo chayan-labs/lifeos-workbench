@@ -4,6 +4,7 @@ import {
   ShieldCheck, Database, Boxes, FolderGit2, Crown, ShieldAlert, Lock, Wand2
 } from 'lucide-react';
 import { LAYERS } from '../lib/capabilities';
+import { WORKSPACE_ID_KEY } from '../lib/api';
 
 const read = (k, fallback = '') => localStorage.getItem(k) || fallback;
 
@@ -17,7 +18,7 @@ export default function Profile() {
   const [name, setName] = useState(read('life_os_user_name', 'Chayan Aggarwal'));
   const [email] = useState(read('life_os_user_email', 'chayan@life-os.dev'));
   const [workspaceName, setWorkspaceName] = useState(read('life_os_workspace_name', 'Personal Brain'));
-  const workspaceId = read('life_os_workspace_id', 'ws_default_0001');
+  const workspaceId = read(WORKSPACE_ID_KEY, 'default-personal-workspace');
   const plan = read('life_os_plan', 'personal');
   const [activePlan, setActivePlan] = useState(plan);
   const [saved, setSaved] = useState(false);

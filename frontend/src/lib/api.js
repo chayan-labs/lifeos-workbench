@@ -6,6 +6,11 @@
 export const API_BASE =
   (import.meta.env && import.meta.env.VITE_API_URL) || 'http://127.0.0.1:8080';
 
+// Canonical localStorage keys for tenant + soft-auth state. See FRONTEND.md §1.
+export const WORKSPACE_ID_KEY = 'life_os_workspace_id';
+export const KEY_TOKEN_KEY = 'life_os_key_token';
+const DEFAULT_WORKSPACE_ID = 'default-personal-workspace';
+
 // status: 'live'    -> implemented in lifeos-api (services/lifeos-api/src/)
 //         'queued'  -> implemented: enqueues a job, returns 202 (service drains later)
 //         'planned' -> route exists but honestly returns 501 until its phase ships
@@ -172,12 +177,25 @@ export const API_ROUTES = [
   },
 ];
 
+// Tenant + soft-auth headers attached to every request, mirroring core/db.js's
+// header shape (X-Workspace-Id always; Authorization only once a key_token
+// exists). Without these the backend silently falls back to the default
+// workspace, masking tenant bugs - see FRONTEND.md §1.
+function authHeaders(json) {
+  const headers = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  headers['X-Workspace-Id'] = localStorage.getItem(WORKSPACE_ID_KEY) || DEFAULT_WORKSPACE_ID;
+  const keyToken = localStorage.getItem(KEY_TOKEN_KEY);
+  if (keyToken) headers['Authorization'] = `Bearer ${keyToken}`;
+  return headers;
+}
+
 // Thin fetch wrapper. Returns { ok, data, error, offline }.
 export async function apiCall(method, path, body) {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: authHeaders(Boolean(body)),
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();

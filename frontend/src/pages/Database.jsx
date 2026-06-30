@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Database as DbIcon, Share2, Type, ArrowRight, Play, RefreshCw, Plus, CheckCircle, Database } from 'lucide-react';
+import { apiCall } from '../lib/api';
 
 export default function DatabaseView() {
   const [selectedEntity, setSelectedEntity] = useState('trade');
@@ -31,16 +32,9 @@ export default function DatabaseView() {
     }
 
     // Ping lifeos-api Axum server to check if it's awake
-    fetch('http://127.0.0.1:8080/api/health')
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'healthy') {
-          setApiStatus('online');
-        } else {
-          setApiStatus('offline');
-        }
-      })
-      .catch(() => setApiStatus('offline'));
+    apiCall('GET', '/api/health').then(({ ok, data }) => {
+      setApiStatus(ok && data?.status === 'healthy' ? 'online' : 'offline');
+    });
   }, []);
 
   const triggerJobRun = (jobId) => {
@@ -153,19 +147,18 @@ export default function DatabaseView() {
     localStorage.setItem('life_os_custom_entities', JSON.stringify(updated));
 
     // Try posting to local Axum backend
-    fetch('http://127.0.0.1:8080/api/entity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        module: formModule,
-        type: formType,
-        title: formTitle,
-        attrs: parsedAttrs
-      })
-    })
-      .then(res => res.json())
-      .then(data => console.log("[Database API] Saved on local server:", data))
-      .catch(err => console.warn("[Database API] Local server offline, saved locally only."));
+    apiCall('POST', '/api/entity', {
+      module: formModule,
+      type: formType,
+      title: formTitle,
+      attrs: parsedAttrs,
+    }).then(({ ok, data, offline }) => {
+      if (offline) {
+        console.warn('[Database API] Local server offline, saved locally only.');
+      } else if (ok) {
+        console.log('[Database API] Saved on local server:', data);
+      }
+    });
 
     setFormSuccess(`Entity "${formTitle}" created.`);
     setTimeout(() => setFormSuccess(''), 3000);

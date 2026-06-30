@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, KeyRound, User, Briefcase, Sparkles, CheckCircle, Moon, Sun } from 'lucide-react';
 import BrandMark from '../components/BrandMark';
+import { apiCall, WORKSPACE_ID_KEY, KEY_TOKEN_KEY } from '../lib/api';
 
 export default function LoginPage({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -44,8 +45,12 @@ export default function LoginPage({ onLogin }) {
       localStorage.setItem('life_os_loggedin', 'true');
       localStorage.setItem('life_os_user_email', email);
       localStorage.setItem('life_os_user_name', 'Chayan Aggarwal');
-      localStorage.setItem('life_os_workspace_id', 'default-personal-workspace');
+      localStorage.setItem(WORKSPACE_ID_KEY, 'default-personal-workspace');
       localStorage.setItem('life_os_workspace_name', 'Personal Workspace');
+      // Demo identity has no backend-minted key_token (soft-auth: there is no
+      // /api/login - only /api/register mints one). Requests fall back to
+      // X-Workspace-Id-only identification, same as the backend's default.
+      localStorage.removeItem(KEY_TOKEN_KEY);
       onLogin();
       return;
     }
@@ -58,8 +63,11 @@ export default function LoginPage({ onLogin }) {
       localStorage.setItem('life_os_loggedin', 'true');
       localStorage.setItem('life_os_user_email', email);
       localStorage.setItem('life_os_user_name', match.name);
-      localStorage.setItem('life_os_workspace_id', match.workspace_id);
+      localStorage.setItem(WORKSPACE_ID_KEY, match.workspace_id);
       localStorage.setItem('life_os_workspace_name', match.workspace_name);
+      // match.key is the key_token minted by /api/register - this IS the
+      // bearer "password" the soft-auth model uses, so persist it canonically.
+      localStorage.setItem(KEY_TOKEN_KEY, match.key);
       onLogin();
     } else {
       setError('Invalid email or key. Use chayan@lifeos.app / password, or register a new workspace.');
@@ -76,47 +84,45 @@ export default function LoginPage({ onLogin }) {
       workspace_name: regWorkspace
     };
 
-    // Attempt registration against the local Axum Rust API
-    fetch('http://127.0.0.1:8080/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => res.json())
-      .then(data => {
-        // Success handler from Rust server
+    // Attempt registration against the local Axum Rust API. Soft-auth model:
+    // there is no /api/login - /api/register is the only place a key_token is
+    // minted, and it doubles as the password the demo login form accepts.
+    apiCall('POST', '/api/register', payload).then(({ ok, data, offline }) => {
+      if (ok && !offline) {
         const newUser = {
           email: regEmail,
           name: regName,
           workspace_name: regWorkspace,
           workspace_id: data.workspace_id,
-          key: data.key_token
+          key: data.key_token,
         };
-        
         saveUserLocally(newUser);
-      })
-      .catch(() => {
-        // Fallback locally if Rust server is offline
-        const mockWorkspaceId = "ws_" + Math.random().toString(36).substring(2, 10);
-        const mockKey = "key_" + Math.random().toString(36).substring(2, 12);
-        
-        const newUser = {
-          email: regEmail,
-          name: regName,
-          workspace_name: regWorkspace,
-          workspace_id: mockWorkspaceId,
-          key: mockKey
-        };
+        return;
+      }
 
-        saveUserLocally(newUser);
+      // Fallback locally if the Rust server is offline.
+      const mockWorkspaceId = 'ws_' + Math.random().toString(36).substring(2, 10);
+      const mockKey = 'key_' + Math.random().toString(36).substring(2, 12);
+      saveUserLocally({
+        email: regEmail,
+        name: regName,
+        workspace_name: regWorkspace,
+        workspace_id: mockWorkspaceId,
+        key: mockKey,
       });
+    });
   };
 
   const saveUserLocally = (newUser) => {
     const savedUsers = JSON.parse(localStorage.getItem('life_os_registered_users') || '[]');
     savedUsers.push(newUser);
     localStorage.setItem('life_os_registered_users', JSON.stringify(savedUsers));
-    
+
+    // Persist under the canonical keys apiCall reads, so the freshly
+    // registered tenant is immediately active (not just the demo workspace).
+    localStorage.setItem(WORKSPACE_ID_KEY, newUser.workspace_id);
+    localStorage.setItem(KEY_TOKEN_KEY, newUser.key);
+
     // Show success view with generated keys
     setRegSuccessData(newUser);
   };

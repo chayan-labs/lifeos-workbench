@@ -22,19 +22,18 @@ It is the pre-React prototype, but `core/db.js` is the *correct reference* for t
 
 ---
 
-## 1. P0 - tenant + auth header propagation (blocks everything)
+## 1. P0 - tenant + auth header propagation (blocks everything) - DONE (#13)
 
 Nothing else can be trusted until every request carries the workspace and (optional) bearer token.
-Today `apiCall()` sends only `Content-Type` and the backend falls back to the seeded default workspace, which silently masks multi-tenant bugs.
 
-**Work:**
-1. Extend `apiCall(method, path, body)` in `src/lib/api.js` to attach, on every request:
+**Implemented:**
+1. `apiCall(method, path, body)` in `src/lib/api.js` attaches, on every request:
    - `X-Workspace-Id: <workspace_id>` read from `localStorage['life_os_workspace_id']` (fallback `default-personal-workspace`).
    - `Authorization: Bearer <key_token>` when `localStorage['life_os_key_token']` is set.
-   - Mirror `core/db.js` exactly so the two clients agree.
-2. Persist `key_token` from the `POST /api/register` response under a single canonical key (`life_os_key_token`); today it is buried inside the `life_os_registered_users` array.
-3. Migrate the three raw-`fetch` call sites to `apiCall`: the health check and entity POST in `Database.jsx`, and the register call in `LoginPage.jsx`.
-4. Decide and **document the auth model**: the backend has no `/api/login`; the `key_token` minted at register *is* the bearer token, and "login" validates it locally. Either keep that (soft auth, matches the base) or open an issue to add a real `/api/login`. Do not invent a second scheme.
+   - Mirrors `core/db.js`'s header shape so the two clients agree.
+2. `key_token` is persisted under the canonical key `life_os_key_token` (exported as `KEY_TOKEN_KEY` from `lib/api.js`) both on `POST /api/register` success and on a matched-registered-user login; the demo identity (`chayan@lifeos.app`) clears it, since it has no backend-minted token.
+3. The three raw-`fetch` call sites now go through `apiCall`: the health check and entity POST in `Database.jsx`, and the register call in `LoginPage.jsx`.
+4. **Auth model decision: soft auth, kept as-is.** There is no `/api/login` on the backend and none is being added. `POST /api/register` is the only place a `key_token` (an HS256 JWT, see `services/lifeos-api/src/auth.rs::issue_token`) is minted; the React "login" form either accepts the hardcoded demo identity or validates an email/key pair against `localStorage['life_os_registered_users']` entirely client-side, then promotes that user's `key_token` to the canonical `life_os_key_token` slot apiCall reads. The backend independently verifies the JWT on every request that carries it (`resolve_workspace`: verified JWT claim > `X-Workspace-Id` header > body param > seeded default) - so client-side "login" never grants tenant access by itself, it only selects which already-issued token gets attached.
 
 **Acceptance:** every network call in the app shows `X-Workspace-Id` (and `Authorization` when registered) in the Network tab; switching workspace in `Profile.jsx` changes the header and the data returned.
 
