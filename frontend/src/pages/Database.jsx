@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database as DbIcon, Share2, Type, ArrowRight, Play, RefreshCw, Plus, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Database as DbIcon, Share2, Type, ArrowRight, RefreshCw, Plus, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../lib/api';
 import EntityDetailPanel from '../components/EntityDetailPanel';
 
 const PAGE_SIZE = 20;
 
+// Poll while any job is still queued/running so the queue reflects
+// lifeos-drain claims without the user manually refreshing.
+const JOBS_POLL_MS = 4000;
+
 export default function DatabaseView() {
   const [selectedEntity, setSelectedEntity] = useState('trade');
-  const [jobs, setJobs] = useState([
-    { id: 'job_ingest_001', kind: 'ingest', payload: '{"video_url":"https://r2.lifeos.db/clips/session_92.mp4"}', status: 'queued', priority: 2 },
-    { id: 'job_build_308', kind: 'module_build', payload: '{"module":"health"}', status: 'running', priority: 5 },
-    { id: 'job_eval_122', kind: 'eval', payload: '{"run_id":"run_49a_sonnet"}', status: 'done', priority: 1 },
-    { id: 'job_oauth_019', kind: 'pipeline', payload: '{"sync":"figma_tokens"}', status: 'failed', priority: 3 }
-  ]);
+  const [jobs, setJobs] = useState([]);
+  const [jobsState, setJobsState] = useState('loading'); // 'loading' | 'ready' | 'offline'
 
   // Live `entities` table browser - GET /api/entity, filtered + paginated.
   const [liveEntities, setLiveEntities] = useState([]);
@@ -71,20 +71,26 @@ export default function DatabaseView() {
     });
   }, []);
 
-  const triggerJobRun = (jobId) => {
-    setJobs((prevJobs) => 
-      prevJobs.map((job) => 
-        job.id === jobId ? { ...job, status: 'running' } : job
-      )
-    );
-    setTimeout(() => {
-      setJobs((prevJobs) => 
-        prevJobs.map((job) => 
-          job.id === jobId ? { ...job, status: 'done' } : job
-        )
-      );
-    }, 1500);
-  };
+  const loadJobs = useCallback(() => {
+    apiCall('GET', '/api/jobs?limit=50').then(({ ok, data, offline }) => {
+      if (ok && !offline && Array.isArray(data)) {
+        setJobs(data);
+        setJobsState('ready');
+      } else {
+        setJobsState('offline');
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    loadJobs();
+    // Only poll while something is actually in flight - avoids hammering the
+    // API once the queue has settled.
+    const hasActive = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+    if (!hasActive) return undefined;
+    const interval = setInterval(loadJobs, JOBS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [loadJobs, jobs]);
 
   const entitiesSchema = [
     { name: 'id', type: 'TEXT (UUID)', desc: 'Primary Key' },
@@ -503,11 +509,22 @@ export default function DatabaseView() {
         </div>
       </div>
 
-      {/* Jobs Queue Section */}
+      {/* Jobs Queue Section - GET /api/jobs, claimed/run by lifeos-drain */}
       <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
-        <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4">
-          Jobs Queue Manager (`jobs` table cloud ↔ Mac)
-        </h3>
+        <div className="flex justify-between items-center border-b-2 border-neo-border pb-3 mb-4">
+          <h3 className="neo-title-md">Jobs Queue Manager (`jobs` table cloud ↔ Mac)</h3>
+          <button onClick={loadJobs} className="neo-btn py-1.5 px-2 bg-neo-surface" title="Refresh">
+            <RefreshCw size={14} className={jobsState === 'loading' ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        {jobsState === 'offline' && (
+          <div className="px-3 py-2 bg-neo-red text-white text-xs font-bold neo-border mb-3">Backend unreachable.</div>
+        )}
+        {jobsState === 'ready' && jobs.length === 0 && (
+          <div className="px-3 py-2 bg-neo-surface-muted text-xs neo-border mb-3">Queue is empty.</div>
+        )}
+
         <div className="flex flex-col gap-3">
           {jobs.map((job) => (
             <div key={job.id} className="p-4 bg-neo-bg neo-border flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -518,28 +535,16 @@ export default function DatabaseView() {
                   <span className="neo-tag text-[9px]">kind: {job.kind}</span>
                 </div>
                 <code className="text-[10px] bg-neo-surface p-1 border font-mono block text-neo-text-muted truncate max-w-lg">
-                  {job.payload}
+                  {JSON.stringify(job.payload)}
                 </code>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-[10px] px-1.5 py-0.5 neo-border font-bold uppercase ${
-                  job.status === 'done' ? 'bg-neo-mint' :
-                  job.status === 'running' ? 'bg-neo-yellow' :
-                  job.status === 'failed' ? 'bg-neo-red text-white' : 'bg-neo-surface'
-                }`}>
-                  {job.status}
-                </span>
-                {job.status !== 'done' && (
-                  <button 
-                    onClick={() => triggerJobRun(job.id)}
-                    disabled={job.status === 'running'}
-                    className="neo-btn py-1 px-3 bg-neo-surface text-xs font-bold flex items-center gap-1.5"
-                  >
-                    {job.status === 'running' ? <RefreshCw className="animate-spin" size={12} /> : <Play size={12} />}
-                    {job.status === 'running' ? 'Running' : 'Trigger'}
-                  </button>
-                )}
-              </div>
+              <span className={`text-[10px] px-1.5 py-0.5 neo-border font-bold uppercase ${
+                job.status === 'done' ? 'bg-neo-mint' :
+                job.status === 'running' ? 'bg-neo-yellow' :
+                job.status === 'failed' ? 'bg-neo-red text-white' : 'bg-neo-surface'
+              }`}>
+                {job.status}
+              </span>
             </div>
           ))}
         </div>
