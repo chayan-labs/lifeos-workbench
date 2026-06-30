@@ -177,11 +177,62 @@ export const TRADING_MANIFEST = {
   ],
 };
 
+// Publishing is always gated (docs/SECURITY.md §2): drafting any post/reply/
+// dm goes through the single closed `draft.create` tool (lib/agentActions.js,
+// #33), which is already classified `gated` regardless of which module/type
+// it's drafting for - there is no separate "social.publish" tool registered
+// anywhere, so a draft can only become published via a human decision (see
+// Modules.jsx's decideDraft, #32). Account linking (Instagram/X/Reddit/Slack/
+// WhatsApp via Nango) is explicitly deferred to Phase 3 per this issue.
+export const SOCIAL_MANIFEST = {
+  id: 'social',
+  name: 'Social',
+  icon: '💬',
+  entityTypes: {
+    social_account: {
+      label: 'Social Account',
+      plural: 'Accounts',
+      display: { title: (e) => e.attrs?.handle, subtitle: 'provider' },
+    },
+    post: {
+      label: 'Post',
+      plural: 'Posts',
+      display: { title: 'title', subtitle: (e) => e.attrs?.scheduled_for, badge: 'status' },
+    },
+    reply: {
+      label: 'Reply',
+      plural: 'Replies',
+      display: { title: 'title', badge: 'status' },
+    },
+    dm: {
+      label: 'DM',
+      plural: 'DMs',
+      display: { title: 'title', badge: 'status' },
+    },
+    mention: {
+      label: 'Mention',
+      plural: 'Mentions',
+      display: { title: 'title', subtitle: (e) => e.attrs?.from },
+    },
+    thread: {
+      label: 'Thread',
+      plural: 'Threads',
+      display: { title: 'title' },
+    },
+  },
+  views: [
+    { id: 'inbox', label: 'Inbox (mentions + DMs)', kind: 'list', type: 'mention' },
+    { id: 'posts', label: 'Posts', kind: 'board', type: 'post', groupBy: 'status', columns: ['drafted', 'published', 'rejected'] },
+    { id: 'accounts', label: 'Accounts (link via Integrations - Nango, Phase 3)', kind: 'list', type: 'social_account' },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
   coding: CODING_MANIFEST,
   trading: TRADING_MANIFEST,
+  social: SOCIAL_MANIFEST,
 };
 
 export function getManifest(id) {
