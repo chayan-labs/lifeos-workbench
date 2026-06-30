@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import BrandMark from './BrandMark';
 import AIConsole from './AIConsole';
 import { ensureBaseline } from '../lib/vcs';
+import { apiCall } from '../lib/api';
 import {
   LayoutDashboard,
   Database,
@@ -29,6 +30,7 @@ export default function Layout({ children, onLogout }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     localStorage.getItem('life_os_sidebar_collapsed') === 'true'
   );
+  const [apiOnline, setApiOnline] = useState(null); // null = checking, true/false once known
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('life_os_theme');
@@ -38,6 +40,19 @@ export default function Layout({ children, onLogout }) {
     }
     // Seal the current state as the protected baseline commit on first run.
     ensureBaseline();
+  }, []);
+
+  // Global API reachability indicator - polled, not just checked once, so
+  // killing the backend mid-session flips the pill/banner without a reload.
+  useEffect(() => {
+    let cancelled = false;
+    const checkHealth = async () => {
+      const { ok, offline } = await apiCall('GET', '/api/health');
+      if (!cancelled) setApiOnline(ok && !offline);
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   const toggleSidebar = () => {
@@ -231,9 +246,20 @@ export default function Layout({ children, onLogout }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 neo-border bg-neo-mint neo-shadow-sm neo-label-sm">
-              <div className="w-2.5 h-2.5 rounded-full bg-[var(--neo-text)] animate-pulse" />
-              <span>Turso replica synced</span>
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 neo-border neo-shadow-sm neo-label-sm ${
+                apiOnline === false ? 'bg-neo-red text-white' : 'bg-neo-mint'
+              }`}
+              title={apiOnline === false ? 'lifeos-api unreachable at ' + (import.meta.env?.VITE_API_URL || 'http://127.0.0.1:8080') : 'lifeos-api reachable'}
+            >
+              <div
+                className={`w-2.5 h-2.5 rounded-full ${
+                  apiOnline === null ? 'bg-neo-text-muted animate-pulse'
+                  : apiOnline ? 'bg-[var(--neo-text)] animate-pulse'
+                  : 'bg-white'
+                }`}
+              />
+              <span>{apiOnline === null ? 'Checking API…' : apiOnline ? 'API online' : 'API offline'}</span>
             </div>
             
             <button
@@ -267,6 +293,12 @@ export default function Layout({ children, onLogout }) {
             </Link>
           </div>
         </header>
+
+        {apiOnline === false && (
+          <div className="px-6 py-2 bg-neo-red text-white text-xs font-mono font-bold text-center neo-divider">
+            lifeos-api is unreachable - reads/writes are falling back to local mock data where supported.
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6 md:p-8">
           {children}
