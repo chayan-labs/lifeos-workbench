@@ -92,6 +92,7 @@ export default function Layout({ children, onLogout }) {
       items: [
         { name: 'Harness', href: '/harness', icon: Boxes },
         { name: 'Storage & VCS', href: '/storage', icon: FolderGit2 },
+        { name: 'Refine Demo', href: '/refine-demo', icon: Boxes },
       ],
     },
     {

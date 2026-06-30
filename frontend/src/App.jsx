@@ -11,6 +11,7 @@ import Storage from './pages/Storage';
 import Integrations from './pages/Integrations';
 import DocsHub from './pages/DocsHub';
 import Profile from './pages/Profile';
+import RefineDemo from './pages/RefineDemo';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(
@@ -90,6 +91,14 @@ export default function App() {
           element={
             <Layout onLogout={handleLogout}>
               <DocsHub />
+            </Layout>
+          }
+        />
+        <Route
+          path="/refine-demo"
+          element={
+            <Layout onLogout={handleLogout}>
+              <RefineDemo />
             </Layout>
           }
         />
