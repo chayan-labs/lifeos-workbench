@@ -38,6 +38,7 @@ export default function DomainWorkspace({ domain, annotations, progress, onOpenT
   // Roadmap / papers / projects
   const [roadmap, setRoadmap] = useState(null);
   const [papers, setPapers] = useState([]);
+  const [recommendText, setRecommendText] = useState('');
   const [projects, setProjects] = useState([]);
 
   // Paper composer
@@ -87,11 +88,17 @@ export default function DomainWorkspace({ domain, annotations, progress, onOpenT
   const runRecommend = async () => {
     setLoading('projects');
     const out = await recommendProjects(domain);
-    const list = out.projects || [];
-    let next = projects;
-    list.forEach((p) => { next = addProject(domain.id, p); });
-    setProjects([...next]);
-    if (out.text) setNoteSummary(''); // structured path only
+    // Live backend path returns free-text recommendations ({ text }); the
+    // offline mock returns structured ({ projects }). Render whichever we get
+    // instead of silently dropping the AI text.
+    if (out.text) {
+      setRecommendText(out.text);
+    } else {
+      const list = out.projects || [];
+      let next = projects;
+      list.forEach((p) => { next = addProject(domain.id, p); });
+      setProjects([...next]);
+    }
     setLoading('');
   };
 
@@ -236,6 +243,9 @@ export default function DomainWorkspace({ domain, annotations, progress, onOpenT
               <span className="neo-label-sm text-neo-text">Project ideas</span>
               <AIButton onClick={runRecommend} loading={loading === 'projects'}>Recommend projects</AIButton>
             </div>
+            {recommendText && (
+              <div className="p-3 neo-border bg-neo-surface-muted text-xs"><MarkdownRenderer content={recommendText} /></div>
+            )}
             {projects.length === 0 ? (
               <EmptyState icon={Hammer} title="No projects yet" hint="Let AI recommend hands-on projects. Accepted projects auto-add to your Repository." />
             ) : (
