@@ -4,6 +4,7 @@ import {
   ShieldCheck, Database, Boxes, FolderGit2, Crown, ShieldAlert, Lock, Wand2
 } from 'lucide-react';
 import { LAYERS } from '../lib/capabilities';
+import { getCapabilityMatrix } from '../lib/capabilityMatrix';
 import { WORKSPACE_ID_KEY } from '../lib/api';
 
 const read = (k, fallback = '') => localStorage.getItem(k) || fallback;
@@ -162,6 +163,39 @@ export default function Profile() {
                   </>
                 )}
               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Agent Control Plane capability matrix - the canonical, read-only
+          {allowed|gated|forbidden} view (docs/AGENT-CONTROL.md §5). There is
+          no edit control anywhere on this page for this section: the matrix
+          is derived from agentActions.js + capabilities.js and cannot widen
+          the agent's own reach from the UI. */}
+      <div className="neo-surface neo-border-thick neo-shadow p-5 flex flex-col gap-3">
+        <h3 className="neo-title-md flex items-center gap-2"><ShieldCheck size={18} /> Agent Control Plane (read-only)</h3>
+        <p className="text-xs text-neo-text-muted">
+          Exactly what the in-app agent can and cannot do, across both typed action tools and app layers.
+          <strong> Forbidden</strong> means no tool/access exists at all - not a check that could be bypassed.
+          <strong> Gated</strong> means a human must approve before it runs. This view is read-only; it cannot be edited from the app.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {getCapabilityMatrix().map((row) => (
+            <div key={`${row.kind}-${row.id}`} className="p-3 neo-border bg-neo-surface flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-neo-text truncate font-mono">{row.label}</div>
+                <div className="text-[10px] text-neo-text-muted">{row.kind}</div>
+              </div>
+              {row.classification === 'forbidden' && (
+                <span className="neo-tag bg-neo-red text-white text-[9px] shrink-0"><Lock size={9} /> forbidden</span>
+              )}
+              {row.classification === 'gated' && (
+                <span className="neo-tag bg-neo-yellow text-neo-text text-[9px] shrink-0">gated</span>
+              )}
+              {row.classification === 'allowed' && (
+                <span className="neo-tag bg-neo-mint text-neo-text text-[9px] shrink-0">allowed</span>
+              )}
             </div>
           ))}
         </div>
