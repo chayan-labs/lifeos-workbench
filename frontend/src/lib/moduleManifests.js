@@ -84,9 +84,53 @@ export const TASKS_MANIFEST = {
   ],
 };
 
+export const CODING_MANIFEST = {
+  id: 'coding',
+  name: 'Coding / Projects',
+  icon: '🛠️',
+  entityTypes: {
+    project: {
+      label: 'Project',
+      plural: 'Projects',
+      display: { title: 'title' },
+    },
+    repo: {
+      label: 'Repo',
+      plural: 'Repos',
+      // ci_state is local-only until GitHub data flows in via Nango (Phase 3)
+      display: { title: 'title', subtitle: (e) => e.attrs?.remote, badge: 'status' },
+    },
+    gap: {
+      label: 'Gap',
+      plural: 'Gaps',
+      display: { title: 'title', subtitle: 'description' },
+    },
+    ci_run: {
+      label: 'CI Run',
+      plural: 'CI Runs',
+      display: { title: 'title', badge: 'status' },
+    },
+    review: {
+      label: 'Review',
+      plural: 'Reviews',
+      display: { title: 'title' },
+    },
+  },
+  views: [
+    { id: 'status', label: 'Status', kind: 'table', type: 'repo', columns: [
+      { key: 'title', label: 'Repo' },
+      { key: 'status', label: 'Status', editable: true },
+      { key: 'default_branch', label: 'Branch' },
+      { key: 'ci_state', label: 'CI' },
+    ] },
+    { id: 'board', label: 'Blocked / Active / Done', kind: 'board', type: 'repo', groupBy: 'status', columns: ['dirty', 'clean', 'blocked'] },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
+  coding: CODING_MANIFEST,
 };
 
 export function getManifest(id) {
