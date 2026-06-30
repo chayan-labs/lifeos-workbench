@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Share2, Activity } from 'lucide-react';
 import { apiCall } from '../lib/api';
+import GenericDetail from '../core/renderers/GenericDetail';
 
 // Slide-over detail view for a single entity: attrs, graph relations (edges
 // where the entity is src or dst), and its event history. Backed entirely by
@@ -73,10 +74,7 @@ export default function EntityDetailPanel({ entityId, onClose }) {
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-lg h-full bg-neo-surface neo-border-thick border-r-0 shadow-2xl overflow-y-auto p-6 flex flex-col gap-6">
         <div className="flex justify-between items-start border-b-2 border-neo-border pb-4">
-          <div>
-            <h3 className="neo-title-md">{entity?.title || entityId}</h3>
-            <span className="text-xs font-mono text-neo-text-muted">{entityId}</span>
-          </div>
+          <span className="text-xs font-mono text-neo-text-muted">{entityId}</span>
           <button onClick={onClose} className="neo-icon-btn p-1"><X size={20} /></button>
         </div>
 
@@ -86,18 +84,7 @@ export default function EntityDetailPanel({ entityId, onClose }) {
 
         {state === 'ready' && entity && (
           <>
-            <div className="flex gap-2 flex-wrap">
-              <span className="neo-chip py-0.5 text-[10px]">module: {entity.module}</span>
-              <span className="neo-chip py-0.5 text-[10px]">type: {entity.type}</span>
-              <span className="neo-chip py-0.5 text-[10px]">status: {entity.status}</span>
-            </div>
-
-            <div>
-              <h4 className="neo-label-md mb-2 text-neo-text-muted">Attributes</h4>
-              <pre className="neo-border p-3 bg-gray-950 text-emerald-400 font-mono text-xs overflow-x-auto">
-{JSON.stringify(entity.attrs || {}, null, 2)}
-              </pre>
-            </div>
+            <GenericDetail entity={entity} display={{ title: 'title' }} />
 
             <div>
               <h4 className="neo-label-md mb-2 text-neo-text-muted flex items-center gap-1.5"><Share2 size={14} /> Relations ({edges.length})</h4>
