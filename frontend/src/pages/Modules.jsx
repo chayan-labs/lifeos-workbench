@@ -60,11 +60,34 @@ export default function ModulesView() {
     });
   };
 
-  // Social account connection draft status
-  const [socialDrafts, setSocialDrafts] = useState([
-    { id: 1, platform: 'X / Twitter', account: '@life_os_dev', text: 'Exciting news! Life OS self-extension validation pipeline is officially 100% locally sandboxed. Headless Playwright assertions prevent build leaks.', status: 'PENDING' },
-    { id: 2, platform: 'Instagram', account: 'life_os_studio', text: 'Behind the scenes: Spinning up custom connectors using self-hosted Nango OAuth vault.', status: 'DRAFT' }
-  ]);
+  // Social drafts: real `social/post` entities, source of truth for status
+  // is the entity row (+ the append-only events trail), not local state -
+  // mirrors the same draft -> Telegram approve/deny -> executed gating model
+  // (docs/SECURITY.md §2) the in-app surface has to match.
+  const [socialDrafts, setSocialDrafts] = useState([]);
+  const [socialDraftsSource, setSocialDraftsSource] = useState('local');
+
+  const entityToDraft = (ent) => ({
+    id: ent.id,
+    platform: (ent.attrs && ent.attrs.platform) || 'X / Twitter',
+    account: (ent.attrs && ent.attrs.account) || '@life_os_dev',
+    text: ent.title || (ent.attrs && ent.attrs.text) || '',
+    status: ent.status || 'drafted',
+  });
+
+  const loadSocialDrafts = () => {
+    apiCall('GET', '/api/entity?module=social&type=post').then(({ ok, data, offline }) => {
+      if (ok && !offline && Array.isArray(data) && data.length > 0) {
+        setSocialDrafts(data.map(entityToDraft));
+        setSocialDraftsSource('api');
+      } else {
+        setSocialDrafts([
+          { id: 1, platform: 'X / Twitter', account: '@life_os_dev', text: 'Exciting news! Life OS self-extension validation pipeline is officially 100% locally sandboxed. Headless Playwright assertions prevent build leaks.', status: 'drafted' },
+          { id: 2, platform: 'Instagram', account: 'life_os_studio', text: 'Behind the scenes: Spinning up custom connectors using self-hosted Nango OAuth vault.', status: 'drafted' },
+        ]);
+      }
+    });
+  };
 
   // Design assets state
   const [assets, setAssets] = useState([
@@ -101,6 +124,7 @@ export default function ModulesView() {
     }
 
     loadTasksFromApi();
+    loadSocialDrafts();
   }, []);
 
   const saveTasks = (newTasks) => {
@@ -146,15 +170,28 @@ export default function ModulesView() {
     });
   };
 
-  // Social Draft Approval
-  const handleApproveDraft = (draftId) => {
-    const draft = socialDrafts.find(d => d.id === draftId);
-    setSocialDrafts(socialDrafts.map(d => d.id === draftId ? { ...d, status: 'PUBLISHED' } : d));
+  // Social draft approve/deny: PATCH the real entity status (if api-backed)
+  // and always append the audit event - the gated publish action itself is
+  // out of scope here (no real publish tool is registered anywhere per
+  // docs/SECURITY.md), this only records the human decision honestly.
+  const decideDraft = (draftId, decision) => {
+    const draft = socialDrafts.find((d) => d.id === draftId);
+    if (!draft) return;
+    const nextStatus = decision === 'approve' ? 'published' : 'rejected';
+    const prev = socialDrafts;
+    setSocialDrafts(socialDrafts.map((d) => (d.id === draftId ? { ...d, status: nextStatus } : d)));
 
-    // Append-only audit trail of the human-gated approval - never an edit/delete.
+    if (socialDraftsSource === 'api') {
+      apiCall('PATCH', `/api/entity/${draftId}`, { status: nextStatus }).then(({ ok, offline }) => {
+        if (!ok || offline) setSocialDrafts(prev);
+      });
+    }
+
+    // Append-only audit trail of the human-gated decision - never an edit/delete.
     apiCall('POST', '/api/event', {
-      type: 'post.published',
+      type: decision === 'approve' ? 'post.published' : 'post.rejected',
       actor: 'social_module',
+      entity_id: socialDraftsSource === 'api' ? draftId : undefined,
       attrs: { text: draft.text, platform: draft.platform, account: draft.account },
     });
   };
@@ -338,32 +375,53 @@ export default function ModulesView() {
             </p>
 
             <div className="flex flex-col gap-4">
-              {socialDrafts.map((draft) => (
-                <div key={draft.id} className="p-4 bg-neo-bg neo-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div className="max-w-2xl">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="neo-chip py-0.5 text-[8px] font-mono">{draft.platform}</span>
-                      <span className="neo-tag text-[9px] font-bold">{draft.account}</span>
+              {socialDrafts.map((draft) => {
+                const pending = draft.status === 'drafted' || !draft.status;
+                return (
+                  <div
+                    key={draft.id}
+                    className={`p-4 neo-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
+                      pending ? 'bg-neo-red/10 border-neo-red' : 'bg-neo-bg'
+                    }`}
+                  >
+                    <div className="max-w-2xl">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="neo-chip py-0.5 text-[8px] font-mono">{draft.platform}</span>
+                        <span className="neo-tag text-[9px] font-bold">{draft.account}</span>
+                        {pending && <span className="neo-tag text-[8px] font-mono bg-neo-red text-white">PENDING APPROVAL</span>}
+                      </div>
+                      <p className="text-xs italic text-neo-text-muted font-semibold mt-1">
+                        "{draft.text}"
+                      </p>
                     </div>
-                    <p className="text-xs italic text-neo-text-muted font-semibold mt-1">
-                      "{draft.text}"
-                    </p>
-                  </div>
 
-                  <div>
-                    {draft.status === 'PUBLISHED' ? (
-                      <span className="neo-chip neo-chip--completed text-[9px]">✅ MOUNTED / PUBLISHED</span>
-                    ) : (
-                      <button 
-                        onClick={() => handleApproveDraft(draft.id)}
-                        className="neo-btn bg-neo-yellow py-1.5 px-3 text-xs font-bold"
-                      >
-                        APPROVE & PUBLISH 🔒
-                      </button>
-                    )}
+                    <div className="flex gap-2 shrink-0">
+                      {draft.status === 'published' && (
+                        <span className="neo-chip neo-chip--completed text-[9px]">✅ PUBLISHED</span>
+                      )}
+                      {draft.status === 'rejected' && (
+                        <span className="neo-chip neo-chip--overdue text-[9px]">✖ REJECTED</span>
+                      )}
+                      {pending && (
+                        <>
+                          <button
+                            onClick={() => decideDraft(draft.id, 'deny')}
+                            className="neo-btn bg-neo-surface py-1.5 px-3 text-xs font-bold"
+                          >
+                            DENY
+                          </button>
+                          <button
+                            onClick={() => decideDraft(draft.id, 'approve')}
+                            className="neo-btn bg-neo-yellow py-1.5 px-3 text-xs font-bold"
+                          >
+                            APPROVE & PUBLISH 🔒
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
