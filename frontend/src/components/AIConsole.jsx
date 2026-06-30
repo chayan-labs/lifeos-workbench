@@ -5,6 +5,8 @@ import { routeIntent, canAI } from '../lib/capabilities';
 import { apiCall } from '../lib/api';
 import { commit as vcsCommit } from '../lib/vcs';
 import { selectedAgent } from '../lib/ai';
+import { compileActionPlan } from '../lib/actionPlanCompiler';
+import ActionPlanPreview from './ActionPlanPreview';
 
 // The app-wide AI surface. Mounted once in Layout; openable from anywhere via:
 //   window.dispatchEvent(new CustomEvent('lifeos:ai', { detail: { prefill, layer } }))
@@ -25,6 +27,8 @@ export default function AIConsole() {
   const [log, setLog] = useState([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null); // proposed change awaiting human commit
+  const [actionPlan, setActionPlan] = useState(null); // compiled ActionPlan awaiting preview
+  const [compiling, setCompiling] = useState(false);
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -88,6 +92,17 @@ export default function AIConsole() {
     setPending(null);
   };
 
+  // Compiles the pending instruction into a structured ActionPlan (typed
+  // actions from the closed agentActions.js registry) instead of the
+  // freeform VCS-commit path - the Agent Control Plane's actuation surface
+  // (docs/AGENT-CONTROL.md §3), separate from the layer-guardrail path above.
+  const compileAsActionPlan = async () => {
+    setCompiling(true);
+    const { plan } = await compileActionPlan(pending.text, pending.scope);
+    setActionPlan(plan);
+    setCompiling(false);
+  };
+
   return (
     <>
       {/* Floating launcher - reachable from every page */}
@@ -137,9 +152,20 @@ export default function AIConsole() {
             ))}
             {busy && <div className="p-2.5 text-xs neo-border bg-neo-surface-muted text-neo-text animate-pulse">Planning…</div>}
             {pending && (
-              <button onClick={applyAndCommit} className="neo-btn bg-neo-mint text-neo-text py-2 px-3 text-xs flex items-center justify-center gap-2 self-start">
-                <GitCommit size={14} /> Apply & commit to VCS
-              </button>
+              <div className="flex flex-col gap-2 self-start">
+                <button onClick={applyAndCommit} className="neo-btn bg-neo-mint text-neo-text py-2 px-3 text-xs flex items-center justify-center gap-2">
+                  <GitCommit size={14} /> Apply & commit to VCS
+                </button>
+                <button onClick={compileAsActionPlan} disabled={compiling} className="neo-btn bg-neo-surface-high text-neo-text py-2 px-3 text-xs flex items-center justify-center gap-2 disabled:opacity-50">
+                  <Wand2 size={14} /> {compiling ? 'Compiling…' : 'Compile as Action Plan (typed, reversible)'}
+                </button>
+              </div>
+            )}
+            {actionPlan && (
+              <div className="p-2.5 neo-border bg-neo-surface-muted">
+                <div className="neo-label-sm mb-2">Compiled Action Plan</div>
+                <ActionPlanPreview plan={actionPlan} onDone={() => setActionPlan(null)} />
+              </div>
             )}
             <div ref={endRef} />
           </div>
