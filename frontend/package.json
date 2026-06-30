@@ -11,6 +11,8 @@
   "dependencies": {
     "@refinedev/core": "^5.0.12",
     "@tailwindcss/vite": "^4.3.0",
+    "cytoscape": "^3.34.0",
+    "cytoscape-cose-bilkent": "^4.1.0",
     "dompurify": "^3.2.7",
     "katex": "^0.17.0",
     "leaflet": "^1.9.4",

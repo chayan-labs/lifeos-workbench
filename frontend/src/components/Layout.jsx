@@ -85,6 +85,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Knowledge', href: '/knowledge', icon: Compass },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
+        { name: 'Graph', href: '/graph', icon: GitBranch },
       ],
     },
     {
