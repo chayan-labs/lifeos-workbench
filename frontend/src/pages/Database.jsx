@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Database as DbIcon, Share2, Type, ArrowRight, RefreshCw, Plus, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../lib/api';
 import EntityDetailPanel from '../components/EntityDetailPanel';
@@ -20,7 +21,24 @@ export default function DatabaseView() {
   const [liveState, setLiveState] = useState('loading'); // 'loading' | 'ready' | 'offline'
   const [liveFilters, setLiveFilters] = useState({ module: '', type: '', status: '' });
   const [livePage, setLivePage] = useState(0);
-  const [detailEntityId, setDetailEntityId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [detailEntityId, setDetailEntityId] = useState(searchParams.get('entity'));
+
+  // Cmd-K's entity search results link here as /database?entity=<id> - open
+  // the slide-over directly instead of requiring the user to find the row.
+  useEffect(() => {
+    const fromUrl = searchParams.get('entity');
+    if (fromUrl) setDetailEntityId(fromUrl);
+  }, [searchParams]);
+
+  const closeDetail = () => {
+    setDetailEntityId(null);
+    if (searchParams.get('entity')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('entity');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const loadLiveEntities = useCallback(() => {
     setLiveState('loading');
@@ -523,7 +541,7 @@ export default function DatabaseView() {
         </div>
       </div>
 
-      <EntityDetailPanel entityId={detailEntityId} onClose={() => setDetailEntityId(null)} />
+      <EntityDetailPanel entityId={detailEntityId} onClose={closeDetail} />
     </div>
   );
 }

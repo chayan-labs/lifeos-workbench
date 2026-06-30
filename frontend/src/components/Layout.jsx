@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import BrandMark from './BrandMark';
 import AIConsole from './AIConsole';
+import CommandBar from './CommandBar';
 import { ensureBaseline } from '../lib/vcs';
 import { apiCall } from '../lib/api';
 import { hydrateFromStorage } from '../lib/moduleRegistry';
@@ -337,6 +338,7 @@ export default function Layout({ children, onLogout }) {
 
       {/* App-wide AI surface - reachable from every page */}
       <AIConsole />
+      <CommandBar />
     </div>
   );
 }
