@@ -11,6 +11,7 @@ mod planned;
 mod register;
 mod edge;
 mod search;
+mod stream;
 
 use crate::state::AppState;
 use axum::{
@@ -43,6 +44,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/metrics", get(metrics::metrics))
         // --- self-extension intake ---
         .route("/api/module-request", post(module_request::create))
+        // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
+        .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---
         .route("/api/agents", get(llm::agents))
         .route("/api/llm", post(llm::llm))

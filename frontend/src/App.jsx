@@ -13,6 +13,7 @@ import DocsHub from './pages/DocsHub';
 import Profile from './pages/Profile';
 import RefineDemo from './pages/RefineDemo';
 import GraphView from './pages/GraphView';
+import InstalledModulePage from './pages/InstalledModulePage';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(
@@ -92,6 +93,14 @@ export default function App() {
           element={
             <Layout onLogout={handleLogout}>
               <DocsHub />
+            </Layout>
+          }
+        />
+        <Route
+          path="/m/:id"
+          element={
+            <Layout onLogout={handleLogout}>
+              <InstalledModulePage />
             </Layout>
           }
         />

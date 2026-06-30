@@ -4,6 +4,8 @@ import BrandMark from './BrandMark';
 import AIConsole from './AIConsole';
 import { ensureBaseline } from '../lib/vcs';
 import { apiCall } from '../lib/api';
+import { hydrateFromStorage } from '../lib/moduleRegistry';
+import { useModuleStream } from '../lib/useModuleStream';
 import {
   LayoutDashboard,
   Database,
@@ -20,7 +22,9 @@ import {
   Boxes,
   Compass,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  GitBranch,
+  Sparkles
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -31,6 +35,21 @@ export default function Layout({ children, onLogout }) {
     localStorage.getItem('life_os_sidebar_collapsed') === 'true'
   );
   const [apiOnline, setApiOnline] = useState(null); // null = checking, true/false once known
+  const [installedModules, setInstalledModules] = useState(() => hydrateFromStorage());
+
+  // Live module hot-reload: subscribes to /api/stream/modules (SSE, polling
+  // fallback) and re-renders the nav the instant a new module installs.
+  useModuleStream();
+  useEffect(() => {
+    const onMounted = (e) => {
+      setInstalledModules((prev) => {
+        if (prev.some((m) => m.id === e.detail.id)) return prev;
+        return [...prev, e.detail.manifest];
+      });
+    };
+    window.addEventListener('lifeos:module-mounted', onMounted);
+    return () => window.removeEventListener('lifeos:module-mounted', onMounted);
+  }, []);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('life_os_theme');
@@ -103,6 +122,15 @@ export default function Layout({ children, onLogout }) {
         { name: 'Docs', href: '/docs', icon: FileText },
       ],
     },
+    // Hot-installed modules (issue #29): appear here the instant the SSE
+    // stream (or its polling fallback) reports a module.installed event -
+    // no manual refresh needed.
+    ...(installedModules.length
+      ? [{
+          group: 'Installed',
+          items: installedModules.map((m) => ({ name: m.name || m.id, href: `/m/${m.id}`, icon: Sparkles })),
+        }]
+      : []),
   ];
   const navigation = navGroups.flatMap((g) => g.items);
 
