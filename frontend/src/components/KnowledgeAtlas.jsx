@@ -8,6 +8,7 @@ import {
 import ATLAS_DATA from '../atlas_data.json';
 import { getCustomDomains, addCustomDomain, removeCustomDomain } from '../lib/atlasStore';
 import { scaffoldDomain } from '../lib/ai';
+import { apiCall } from '../lib/api';
 
 // Palette + icons used to backfill metadata for domain entries that were
 // seeded with only { id, topics[] } (the JSON has ~132 such stubs). Without
@@ -226,25 +227,17 @@ export default function KnowledgeAtlas() {
     window.getSelection()?.removeAllRanges();
 
     if (annData.kind === 'question' && !annData.answer) {
-      try {
-        const r = await fetch('http://127.0.0.1:8080/api/llm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system: "You are a helpful study assistant. Answer the user's question based on the provided context.",
-            prompt: `Context Quote: "${annData.quote}"\nQuestion: ${annData.text}`
-          })
-        });
-        if (r.ok) {
-          const j = await r.json();
-          saveAnnotations(newAnns.map(a => a.id === annData.id ? { ...a, answer: j.text, answeredAt: new Date().toISOString() } : a));
-        } else {
-          throw new Error();
-        }
-      } catch {
-        setTimeout(() => {
-          saveAnnotations(newAnns.map(a => a.id === annData.id ? { ...a, answer: "Mock response - Rust backend `/api/llm` not connected yet.", answeredAt: new Date().toISOString() } : a));
-        }, 1000);
+      // Route through apiCall so the request carries API_BASE + tenant/auth
+      // headers (X-Workspace-Id, Authorization). A raw fetch here would be
+      // untenanted and pinned to localhost, breaking non-local deployments.
+      const { ok, data } = await apiCall('POST', '/api/llm', {
+        system: "You are a helpful study assistant. Answer the user's question based on the provided context.",
+        prompt: `Context Quote: "${annData.quote}"\nQuestion: ${annData.text}`,
+      });
+      if (ok && data && data.text) {
+        saveAnnotations(newAnns.map(a => a.id === annData.id ? { ...a, answer: data.text, answeredAt: new Date().toISOString() } : a));
+      } else {
+        saveAnnotations(newAnns.map(a => a.id === annData.id ? { ...a, answer: "Mock response - Rust backend `/api/llm` not connected yet.", answeredAt: new Date().toISOString() } : a));
       }
     }
   };
@@ -258,15 +251,10 @@ export default function KnowledgeAtlas() {
   };
 
   const callLLM = async (system, prompt) => {
-    try {
-      const res = await fetch('http://127.0.0.1:8080/api/llm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system, prompt })
-      });
-      if (res.ok) { const j = await res.json(); return j.text; }
-      throw new Error();
-    } catch {
+    // Route through apiCall for API_BASE + tenant/auth headers (see above).
+    const { ok, data } = await apiCall('POST', '/api/llm', { system, prompt });
+    if (ok && data && data.text) return data.text;
+    {
       return new Promise(resolve => {
         setTimeout(() => {
           if (system.includes("Socratic")) resolve(`How does this specifically relate to the core model of **${activeTopic?.title}**? Give a concrete example.`);
