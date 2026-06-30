@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Refine, useList } from '@refinedev/core';
 import { Boxes } from 'lucide-react';
 import { refineDataProvider } from '../lib/refineDataProvider';
+import GenericList from '../core/renderers/GenericList';
 
 // Proof that refineDataProvider works end-to-end against the live API: a
 // Refine `useList` call rendering real `tasks/task` entities. See issue
@@ -17,29 +18,12 @@ function TaskList() {
   if (isError) return <p className="text-xs text-neo-red">Refine query failed: {error?.message}</p>;
 
   const rows = data?.data || [];
-  if (!rows.length) {
-    return <p className="text-xs text-neo-text-muted">No tasks/task entities yet - create one from the Database or Modules page, then reload this view.</p>;
-  }
-
   return (
-    <table className="w-full text-xs font-mono">
-      <thead>
-        <tr className="text-left text-neo-text-muted border-b-2 border-neo-border">
-          <th className="py-1.5">id</th>
-          <th className="py-1.5">title</th>
-          <th className="py-1.5">status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.id} className="border-b border-neo-border/40">
-            <td className="py-1.5">{r.id}</td>
-            <td className="py-1.5">{r.title || '(untitled)'}</td>
-            <td className="py-1.5">{r.status}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <GenericList
+      entities={rows}
+      display={{ title: 'title', badge: 'status' }}
+      emptyLabel="No tasks/task entities yet - create one from the Database or Modules page, then reload this view."
+    />
   );
 }
 

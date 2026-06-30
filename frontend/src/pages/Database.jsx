@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Database as DbIcon, Share2, Type, ArrowRight, RefreshCw, Plus, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../lib/api';
 import EntityDetailPanel from '../components/EntityDetailPanel';
+import GenericTable from '../core/renderers/GenericTable';
 
 const PAGE_SIZE = 20;
 
@@ -445,46 +446,18 @@ export default function DatabaseView() {
 
         {liveEntities.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b-2 border-neo-border text-left">
-                  <th className="py-2 pr-4 font-mono text-neo-text-muted">id</th>
-                  <th className="py-2 pr-4 font-mono text-neo-text-muted">module</th>
-                  <th className="py-2 pr-4 font-mono text-neo-text-muted">type</th>
-                  <th className="py-2 pr-4 font-mono text-neo-text-muted">status</th>
-                  <th className="py-2 pr-4 font-mono text-neo-text-muted">title</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveEntities.map((ent) => (
-                  <tr
-                    key={ent.id}
-                    className="border-b border-neo-border/40 hover:bg-neo-surface-muted"
-                  >
-                    <td className="py-2 pr-4 font-mono cursor-pointer" onClick={() => setDetailEntityId(ent.id)}>{ent.id}</td>
-                    <td className="py-2 pr-4">{ent.module}</td>
-                    <td className="py-2 pr-4">{ent.type}</td>
-                    <td className="py-2 pr-4" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        defaultValue={ent.status}
-                        onBlur={(e) => {
-                          const next = e.target.value.trim();
-                          if (!next || next === ent.status) return;
-                          setLiveEntities((prev) => prev.map((x) => x.id === ent.id ? { ...x, status: next } : x));
-                          apiCall('PATCH', `/api/entity/${ent.id}`, { status: next }).then(({ ok, offline }) => {
-                            if (!ok || offline) {
-                              setLiveEntities((prev) => prev.map((x) => x.id === ent.id ? { ...x, status: ent.status } : x));
-                            }
-                          });
-                        }}
-                        className="neo-chip py-0.5 text-[9px] w-24 bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-neo-blue"
-                      />
-                    </td>
-                    <td className="py-2 pr-4 truncate max-w-xs cursor-pointer" onClick={() => setDetailEntityId(ent.id)}>{ent.title}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <GenericTable
+              entities={liveEntities}
+              setEntities={setLiveEntities}
+              onRowClick={(ent) => setDetailEntityId(ent.id)}
+              columns={[
+                { key: 'id', label: 'id' },
+                { key: 'module', label: 'module' },
+                { key: 'type', label: 'type' },
+                { key: 'status', label: 'status', editable: true },
+                { key: 'title', label: 'title', truncate: true },
+              ]}
+            />
           </div>
         )}
 

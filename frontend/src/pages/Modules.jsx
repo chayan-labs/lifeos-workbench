@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AIEdit from '../components/ui/AIEdit';
 import { apiCall } from '../lib/api';
+import GenericBoard from '../core/renderers/GenericBoard';
 import {
   GraduationCap, 
   CheckSquare, 
@@ -286,58 +287,18 @@ export default function ModulesView() {
           </div>
         </div>
 
-        {/* 1. TASKS / PRODUCTIVITY MODULE VIEW */}
+        {/* 1. TASKS / PRODUCTIVITY MODULE VIEW - rendered by the generic Board
+            renderer (core/renderers/GenericBoard) driven by a display config,
+            not bespoke per-module JSX. */}
         {activeModule === 'tasks' && viewStyle === 'board' && (
           <div className="flex-1 flex flex-col gap-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-1">
-              {['DRAFT', 'IN_PROGRESS', 'REVIEW', 'COMPLETED'].map((col) => (
-                <div key={col} className="p-4 bg-neo-bg neo-border flex flex-col gap-3">
-                  <div className="border-b-2 border-neo-border pb-2 mb-1 flex justify-between items-center">
-                    <span className="neo-label-sm font-bold text-xs">{col}</span>
-                    <span className="text-[10px] font-mono bg-neo-surface px-1.5 neo-border">
-                      {tasks.filter(t => t.status === col).length}
-                    </span>
-                  </div>
-                  
-                  <div className="flex flex-col gap-3 overflow-y-auto max-h-[250px]">
-                    {tasks.filter(t => t.status === col).map((task) => (
-                      <div key={task.id} className="p-3 bg-neo-surface neo-border neo-shadow-sm hover:scale-[1.02] transition-all flex flex-col gap-2">
-                        <div>
-                          <span className="neo-tag text-[8px] mb-2">{task.label}</span>
-                          <p className="text-xs font-bold leading-tight mt-1">{task.title}</p>
-                        </div>
-                        <div className="flex gap-1.5 pt-2 border-t border-dashed">
-                          {col !== 'DRAFT' && (
-                            <button 
-                              onClick={() => {
-                                const phases = ['DRAFT', 'IN_PROGRESS', 'REVIEW', 'COMPLETED'];
-                                const idx = phases.indexOf(col);
-                                moveTask(task.id, phases[idx - 1]);
-                              }}
-                              className="text-[9px] font-bold font-mono text-neo-text-muted hover:underline"
-                            >
-                              ← Prev
-                            </button>
-                          )}
-                          {col !== 'COMPLETED' && (
-                            <button 
-                              onClick={() => {
-                                const phases = ['DRAFT', 'IN_PROGRESS', 'REVIEW', 'COMPLETED'];
-                                const idx = phases.indexOf(col);
-                                moveTask(task.id, phases[idx + 1]);
-                              }}
-                              className="text-[9px] font-bold font-mono text-neo-blue hover:underline ml-auto"
-                            >
-                              Next →
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <GenericBoard
+              entities={tasks}
+              setEntities={saveTasks}
+              columns={['DRAFT', 'IN_PROGRESS', 'REVIEW', 'COMPLETED']}
+              display={{ title: 'title', badge: 'label' }}
+              onMove={tasksSource === 'api' ? undefined : (task, nextStatus) => moveTask(task.id, nextStatus)}
+            />
 
             {/* Quick Add Form */}
             <div className="p-4 bg-neo-bg neo-border">
