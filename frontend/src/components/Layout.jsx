@@ -106,6 +106,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },
+        { name: 'Dashboards', href: '/dashboards', icon: LayoutDashboard },
       ],
     },
     {

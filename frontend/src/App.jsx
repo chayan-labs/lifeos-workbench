@@ -14,6 +14,7 @@ import Profile from './pages/Profile';
 import RefineDemo from './pages/RefineDemo';
 import GraphView from './pages/GraphView';
 import InstalledModulePage from './pages/InstalledModulePage';
+import ModuleDashboards from './pages/ModuleDashboards';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(
@@ -93,6 +94,14 @@ export default function App() {
           element={
             <Layout onLogout={handleLogout}>
               <DocsHub />
+            </Layout>
+          }
+        />
+        <Route
+          path="/dashboards"
+          element={
+            <Layout onLogout={handleLogout}>
+              <ModuleDashboards />
             </Layout>
           }
         />
