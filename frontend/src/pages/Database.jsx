@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database as DbIcon, Share2, Type, ArrowRight, Play, RefreshCw, Plus, CheckCircle, Database } from 'lucide-react';
+import { Database as DbIcon, Share2, Type, ArrowRight, Play, RefreshCw, Plus, CheckCircle } from 'lucide-react';
 import { apiCall } from '../lib/api';
 
 export default function DatabaseView() {
