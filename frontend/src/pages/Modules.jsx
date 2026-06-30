@@ -147,19 +147,15 @@ export default function ModulesView() {
 
   // Social Draft Approval
   const handleApproveDraft = (draftId) => {
-    const updated = socialDrafts.map(d => d.id === draftId ? { ...d, status: 'PUBLISHED' } : d);
-    setSocialDrafts(updated);
-    
-    // Log as a custom published event in localStorage events to mirror system action
-    const customEvents = JSON.parse(localStorage.getItem('life_os_custom_events') || '[]');
-    customEvents.unshift({
-      id: "ev_" + Math.random().toString(36).substring(2, 9),
-      ts: Date.now(),
-      type: "post.published",
-      actor: "social_module",
-      attrs: { text: socialDrafts.find(d => d.id === draftId).text }
+    const draft = socialDrafts.find(d => d.id === draftId);
+    setSocialDrafts(socialDrafts.map(d => d.id === draftId ? { ...d, status: 'PUBLISHED' } : d));
+
+    // Append-only audit trail of the human-gated approval - never an edit/delete.
+    apiCall('POST', '/api/event', {
+      type: 'post.published',
+      actor: 'social_module',
+      attrs: { text: draft.text, platform: draft.platform, account: draft.account },
     });
-    localStorage.setItem('life_os_custom_events', JSON.stringify(customEvents));
   };
 
   // Figma/Higgsfield Asset Generator simulation

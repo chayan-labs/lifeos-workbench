@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { History, CheckSquare, AlertTriangle, Eye, Sparkles, TrendingUp, RefreshCw, Layers, Check } from 'lucide-react';
+import { apiCall } from '../lib/api';
 
 export default function HarnessLoop() {
   const [judgeScore, setJudgeScore] = useState(88);
   const [isPromoting, setIsPromoting] = useState(false);
   const [promotionStatus, setPromotionStatus] = useState(null); // null | 'done' | 'discarded'
 
-  const telemetryData = [
-    { module: 'trading', tokenCost: '$0.12', latency: '2.1s', judge: '94/100', eventsCount: 14 },
-    { module: 'social', tokenCost: '$0.06', latency: '1.4s', judge: '88/100', eventsCount: 8 },
-    { module: 'scaffold', tokenCost: '$0.45', latency: '8.7s', judge: '98/100', eventsCount: 4 },
-    { module: 'learning', tokenCost: '$0.02', latency: '0.8s', judge: '92/100', eventsCount: 22 },
-  ];
+  // Telemetry table is the append-only events log (GET /api/event). Promote
+  // is the only mutation, and it only ever appends (POST /api/event) - there
+  // is deliberately no edit/delete UI here, mirroring the backend's contract.
+  const [events, setEvents] = useState([]);
+  const [eventsState, setEventsState] = useState('loading'); // 'loading' | 'ready' | 'offline'
+
+  const loadEvents = () => {
+    setEventsState('loading');
+    apiCall('GET', '/api/event?limit=50').then(({ ok, data, offline }) => {
+      if (ok && !offline && Array.isArray(data)) {
+        setEvents(data);
+        setEventsState('ready');
+      } else {
+        setEventsState('offline');
+      }
+    });
+  };
+
+  useEffect(() => { loadEvents(); }, []);
 
   return (
     <div className="flex flex-col gap-8">
@@ -97,22 +111,20 @@ export default function HarnessLoop() {
                 <button
                   onClick={() => {
                     setIsPromoting(true);
-                    setTimeout(() => {
+                    apiCall('POST', '/api/event', {
+                      type: 'config.promoted',
+                      actor: 'release_loop',
+                      attrs: { config_id: 'cfg_v2_rerank_prior', old_score: judgeScore, new_score: 91 },
+                    }).then(({ ok, offline }) => {
                       setIsPromoting(false);
-                      setJudgeScore(91);
-                      
-                      // Push to local events log
-                      const customEvents = JSON.parse(localStorage.getItem('life_os_custom_events') || '[]');
-                      customEvents.unshift({
-                        id: "ev_" + Math.random().toString(36).substring(2, 9),
-                        ts: Date.now(),
-                        type: "config.promoted",
-                        actor: "release_loop",
-                        attrs: { config_id: "cfg_v2_rerank_prior", old_score: 88, new_score: 91 }
-                      });
-                      localStorage.setItem('life_os_custom_events', JSON.stringify(customEvents));
-                      setPromotionStatus('done');
-                    }, 1200);
+                      if (ok && !offline) {
+                        setJudgeScore(91);
+                        setPromotionStatus('done');
+                        loadEvents();
+                      } else {
+                        setPromotionStatus('discarded');
+                      }
+                    });
                   }}
                   disabled={isPromoting}
                   className="neo-btn bg-neo-yellow flex-1 py-2 text-xs font-bold flex items-center justify-center gap-2"
@@ -120,38 +132,63 @@ export default function HarnessLoop() {
                   {isPromoting ? <RefreshCw className="animate-spin" size={12} /> : null}
                   PROMOTE TO PRODUCTION
                 </button>
-                <button onClick={() => setPromotionStatus('discarded')} className="neo-btn bg-neo-surface px-4 text-xs font-bold text-neo-red">
+                <button
+                  onClick={() => {
+                    apiCall('POST', '/api/event', {
+                      type: 'config.discarded',
+                      actor: 'release_loop',
+                      attrs: { config_id: 'cfg_v2_rerank_prior' },
+                    }).then(loadEvents);
+                    setPromotionStatus('discarded');
+                  }}
+                  className="neo-btn bg-neo-surface px-4 text-xs font-bold text-neo-red"
+                >
                   DISCARD
                 </button>
               </div>
             </div>
 
-            {/* Telemetry log table */}
-            <h4 className="neo-label-md mb-2 text-neo-text-muted">Observability Telemetry Logs</h4>
-            <div className="neo-border overflow-x-auto text-xs">
-              <table className="w-full text-left border-collapse bg-neo-surface">
-                <thead>
-                  <tr className="border-b-2 border-neo-border bg-neo-bg">
-                    <th className="p-2 font-bold">MODULE</th>
-                    <th className="p-2 font-bold font-mono">TOKEN COST</th>
-                    <th className="p-2 font-bold font-mono">LATENCY</th>
-                    <th className="p-2 font-bold font-mono">EVAL SCORE</th>
-                    <th className="p-2 font-bold text-right">EVENTS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {telemetryData.map((data, idx) => (
-                    <tr key={idx} className="border-b border-neo-border">
-                      <td className="p-2 font-semibold font-mono text-neo-blue">{data.module}</td>
-                      <td className="p-2 font-mono">{data.tokenCost}</td>
-                      <td className="p-2 font-mono">{data.latency}</td>
-                      <td className="p-2 font-mono text-neo-mint font-bold">{data.judge}</td>
-                      <td className="p-2 text-right font-mono font-semibold">{data.eventsCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {/* Telemetry log table - append-only, GET /api/event */}
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="neo-label-md text-neo-text-muted">Observability Telemetry Logs</h4>
+              <button onClick={loadEvents} className="neo-btn py-1 px-2 bg-neo-surface" title="Refresh">
+                <RefreshCw size={12} className={eventsState === 'loading' ? 'animate-spin' : ''} />
+              </button>
             </div>
+            {eventsState === 'offline' && (
+              <div className="px-3 py-2 bg-neo-red text-white text-xs font-bold neo-border mb-3">Backend unreachable.</div>
+            )}
+            {eventsState === 'ready' && events.length === 0 && (
+              <div className="px-3 py-2 bg-neo-surface-muted text-xs neo-border mb-3">No events logged yet.</div>
+            )}
+            {events.length > 0 && (
+              <div className="neo-border overflow-x-auto text-xs">
+                <table className="w-full text-left border-collapse bg-neo-surface">
+                  <thead>
+                    <tr className="border-b-2 border-neo-border bg-neo-bg">
+                      <th className="p-2 font-bold">TYPE</th>
+                      <th className="p-2 font-bold font-mono">ACTOR</th>
+                      <th className="p-2 font-bold font-mono">TOKENS IN/OUT</th>
+                      <th className="p-2 font-bold font-mono">COST</th>
+                      <th className="p-2 font-bold font-mono">EVAL SCORE</th>
+                      <th className="p-2 font-bold text-right">GATED</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((ev) => (
+                      <tr key={ev.id} className="border-b border-neo-border">
+                        <td className="p-2 font-semibold font-mono text-neo-blue">{ev.type}</td>
+                        <td className="p-2 font-mono">{ev.actor}</td>
+                        <td className="p-2 font-mono">{ev.tokens_in ?? '-'}/{ev.tokens_out ?? '-'}</td>
+                        <td className="p-2 font-mono">{ev.cost != null ? `$${Number(ev.cost).toFixed(2)}` : '-'}</td>
+                        <td className="p-2 font-mono text-neo-mint font-bold">{ev.eval_score ?? '-'}</td>
+                        <td className="p-2 text-right font-mono font-semibold">{ev.gated ? 'YES' : 'NO'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
           </div>
         </div>
