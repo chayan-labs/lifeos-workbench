@@ -61,8 +61,8 @@ pub async fn create(
     let mut rows = state
         .conn
         .query(
-            &format!("SELECT {COLS_EDGE} FROM edges WHERE id = ?1"),
-            libsql::params![id],
+            &format!("SELECT {COLS_EDGE} FROM edges WHERE id = ?1 AND workspace_id = ?2"),
+            libsql::params![id, workspace_id],
         )
         .await?;
     let row = rows.next().await?.ok_or_else(|| ApiError::Internal("edge vanished".into()))?;

@@ -33,10 +33,15 @@ pub async fn replay_entity_attrs(
 ) -> ApiResult<Option<Value>> {
     let mut rows = conn
         .query(
+            // Order by the ULID `id` (the causal key): it embeds millisecond
+            // creation time and is monotonic per writer, so it is finer and more
+            // skew-resistant than `ts`, which is only second-granularity. Using
+            // `ts` first would let coarse, cross-machine-skewed timestamps reorder
+            // same-second events that the ULID already orders correctly.
             "SELECT attrs FROM events \
              WHERE workspace_id = ?1 AND entity_id = ?2 \
                AND type IN ('entity.created', 'entity.updated') \
-             ORDER BY ts ASC, id ASC",
+             ORDER BY id ASC",
             libsql::params![workspace_id, entity_id],
         )
         .await?;

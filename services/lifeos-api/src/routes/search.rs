@@ -69,7 +69,11 @@ pub async fn search(
 fn build_fts_query(raw: &str) -> String {
     let terms: Vec<String> = raw
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.len() >= 2)
+        // Count characters, not bytes: `len()` would drop a legitimate
+        // single-character query while letting one multibyte char (e.g. CJK)
+        // through, skewing recall. `chars().count()` keeps the >=2 rule correct
+        // across scripts.
+        .filter(|t| t.chars().count() >= 2)
         .map(|t| format!("\"{}\"", t.to_lowercase()))
         .collect();
     terms.join(" OR ")
