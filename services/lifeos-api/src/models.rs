@@ -180,3 +180,37 @@ pub fn read_job(row: &Row) -> Result<Job, ApiError> {
         created_at: row.get(10)?,
     })
 }
+
+// ------------------------------------------------------------- connections
+
+/// Deliberately excludes `secret_enc` and `nango_connection_id` is the only
+/// handle exposed - never a raw token (docs/SECURITY.md §1).
+pub const COLS_CONNECTION: &str =
+    "id, workspace_id, provider, account_handle, nango_connection_id, scopes, expires_at, status, created_at";
+
+#[derive(Serialize)]
+pub struct Connection {
+    pub id: String,
+    pub workspace_id: String,
+    pub provider: String,
+    pub account_handle: Option<String>,
+    pub nango_connection_id: Option<String>,
+    pub scopes: Option<String>,
+    pub expires_at: Option<i64>,
+    pub status: Option<String>,
+    pub created_at: i64,
+}
+
+pub fn read_connection(row: &Row) -> Result<Connection, ApiError> {
+    Ok(Connection {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        provider: row.get(2)?,
+        account_handle: row.get(3)?,
+        nango_connection_id: row.get(4)?,
+        scopes: row.get(5)?,
+        expires_at: row.get(6)?,
+        status: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}

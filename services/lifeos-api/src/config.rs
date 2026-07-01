@@ -33,6 +33,13 @@ pub struct Config {
     pub agent_cwd: Option<String>,
     /// Hard ceiling on how long a single agent invocation may run.
     pub agent_timeout_secs: u64,
+    /// Base URL of the self-hosted Nango instance (infra/nango/). `None` means
+    /// no Nango deployment is configured yet - connection routes return
+    /// `ApiError::NotImplemented` rather than pretending to work.
+    pub nango_server_url: Option<String>,
+    /// Bearer secret lifeos-api authenticates to Nango's API with. Never sent
+    /// to the client, never logged (docs/SECURITY.md §1).
+    pub nango_secret_key: Option<String>,
 }
 
 impl Config {
@@ -68,6 +75,9 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(180);
 
+        let nango_server_url = std::env::var("NANGO_SERVER_URL").ok().filter(|s| !s.is_empty());
+        let nango_secret_key = std::env::var("NANGO_SECRET_KEY_DEV").ok().filter(|s| !s.is_empty());
+
         Self {
             db_path,
             turso_url,
@@ -78,6 +88,8 @@ impl Config {
             jwt_secret,
             agent_cwd,
             agent_timeout_secs,
+            nango_server_url,
+            nango_secret_key,
         }
     }
 }

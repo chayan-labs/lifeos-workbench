@@ -40,6 +40,8 @@ async fn test_app() -> TestApp {
         jwt_secret: "test-secret".into(),
         agent_cwd: None,
         agent_timeout_secs: 30,
+        nango_server_url: None,
+        nango_secret_key: None,
     };
     let state = build_state(config).await.expect("build state");
     TestApp { router: routes::router(state), db_path, derived }

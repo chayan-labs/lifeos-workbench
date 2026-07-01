@@ -1,5 +1,6 @@
 //! HTTP surface for `lifeos-api`. One handler module per resource group.
 
+mod connection;
 mod entity;
 mod event;
 mod health;
@@ -47,6 +48,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/metrics", get(metrics::metrics))
         // --- self-extension intake ---
         .route("/api/module-request", post(module_request::create))
+        // --- owned-credential connect/disconnect (issue #47) ---
+        .route("/api/connections", get(connection::list))
+        .route("/api/connections/session", post(connection::start_session))
+        .route("/api/connections/complete", post(connection::complete))
+        .route("/api/connections/:id", axum::routing::delete(connection::disconnect))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---

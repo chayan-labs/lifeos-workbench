@@ -2,6 +2,7 @@
 
 use crate::agents::DetectedAgent;
 use crate::config::Config;
+use crate::nango::NangoClient;
 use libsql::{Connection, Database};
 use std::sync::Arc;
 
@@ -15,6 +16,10 @@ pub struct AppState {
     pub config: Config,
     /// Agent CLIs detected on PATH at boot (the `/api/llm` engines).
     pub agents: Arc<Vec<DetectedAgent>>,
+    /// Self-hosted Nango client. `None` until infra/nango/ is deployed and a
+    /// secret key is configured - connection routes surface NotImplemented
+    /// rather than pretending to work (docs/MANUAL-SETUP.md #47-55).
+    pub nango: Option<Arc<dyn NangoClient>>,
 }
 
 impl AppState {

@@ -214,6 +214,8 @@ mod tests {
             jwt_secret: "test".into(),
             agent_cwd: None,
             agent_timeout_secs: 30,
+            nango_server_url: None,
+            nango_secret_key: None,
         }
     }
 
