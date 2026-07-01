@@ -29,6 +29,30 @@ agent tool (gated:true) ──► draft entity + events('*.drafted')
 ```
 Every transition is an `event`. Nothing outward happens without a human approve.
 
+**Implemented (issue #66):** the Telegram half of this diagram, up to (not including) the
+executor. `worker/src/approvals.ts` - `approveEntity`/`denyEntity` take a `pending_approval`
+entity id, verify it's still `pending_approval` **for the caller's workspace** before
+transitioning (a stale/duplicate tap is a safe no-op, `outcome: 'already_resolved'`, not a
+crash or a double-transition), then:
+- **approve** → `status='approved'`, `events('${type}.approved')`, and enqueues
+  `jobs(kind='execute_approval', payload={entity_id, entity_type})` - the Worker never calls
+  Nango's proxy, the browser actuator, or trade-exec itself (it holds no provider tokens,
+  ARCHITECTURE.md §3.1); real dispatch of that job is `services/lifeos-drain`'s
+  `dispatch()`, not yet wired for this kind (its other kinds are stubs too) - **so "approve"
+  today means "queued," not "executed."** The acceptance bar ("nothing outward executes
+  without an approve tap") holds either way: nothing executes at all yet without one.
+- **deny** → `status='denied'`, `events('${type}.rejected')` (this doc's exact `*.rejected`
+  naming), no job.
+
+`worker/src/bot.ts`: `/draft <text>` creates a draft and attaches an inline Approve/Deny
+keyboard to its own confirmation message; `/pending` lists every `pending_approval` entity
+in the workspace (one message + keyboard per item, including ones `draft_action`-backed
+routes in `lifeos-api` created, not just bot-originated ones) since there's no push
+notification yet when a new draft appears - deferred alongside the digest in
+`docs/PLATFORM-SYSTEMS.md` §3. A `callback_query:data` handler parses `approve:<id>`/
+`deny:<id>`, calls the above, and edits the message + answers the callback with the
+outcome.
+
 ---
 
 ## 3. Self-extension & marketplace sandbox

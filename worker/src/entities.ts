@@ -141,3 +141,34 @@ export async function markTaskDoneBySuffix(db: WorkerDb, workspaceId: string, su
 
   return { outcome: "done", entity: { ...task, status: "done", updatedAt } };
 }
+
+export async function getEntityById(db: WorkerDb, workspaceId: string, id: string): Promise<Entity | null> {
+  const rows = await db
+    .select()
+    .from(entities)
+    .where(and(eq(entities.workspaceId, workspaceId), eq(entities.id, id)))
+    .limit(1);
+
+  return (rows[0] as Entity | undefined) ?? null;
+}
+
+// issue #66: the only way `pending_approval` -> `approved`/`denied` happens -
+// always scoped to `workspaceId` AND the entity's current status, so a
+// double-tap (or a stale button on an already-resolved draft) is a no-op
+// rather than a duplicate transition.
+export async function transitionEntityStatus(
+  db: WorkerDb,
+  workspaceId: string,
+  id: string,
+  fromStatus: string,
+  toStatus: string,
+): Promise<Entity | null> {
+  const updatedAt = Math.floor(Date.now() / 1000);
+  const result = await db
+    .update(entities)
+    .set({ status: toStatus, updatedAt })
+    .where(and(eq(entities.workspaceId, workspaceId), eq(entities.id, id), eq(entities.status, fromStatus)))
+    .returning();
+
+  return (result[0] as Entity | undefined) ?? null;
+}

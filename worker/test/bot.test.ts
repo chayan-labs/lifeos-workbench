@@ -51,6 +51,51 @@ function repliesFrom(bot: ReturnType<typeof createBot>) {
   return sent;
 }
 
+interface CapturedCalls {
+  messages: { text: string; replyMarkup?: { inline_keyboard: { text: string; callback_data?: string }[][] } }[];
+  edits: string[];
+  answeredCallbacks: (string | undefined)[];
+}
+
+function captureAll(bot: ReturnType<typeof createBot>): CapturedCalls {
+  const captured: CapturedCalls = { messages: [], edits: [], answeredCallbacks: [] };
+  bot.api.config.use((prev, method, payload, signal) => {
+    if (method === "sendMessage") {
+      const p = payload as { text: string; reply_markup?: CapturedCalls["messages"][number]["replyMarkup"] };
+      captured.messages.push({ text: p.text, replyMarkup: p.reply_markup });
+      return Promise.resolve({ ok: true, result: {} } as never);
+    }
+    if (method === "editMessageText") {
+      captured.edits.push((payload as { text: string }).text);
+      return Promise.resolve({ ok: true, result: true } as never);
+    }
+    if (method === "answerCallbackQuery") {
+      captured.answeredCallbacks.push((payload as { text?: string }).text);
+      return Promise.resolve({ ok: true, result: true } as never);
+    }
+    return prev(method, payload, signal);
+  });
+  return captured;
+}
+
+function callbackQueryUpdate(data: string) {
+  return {
+    update_id: 3,
+    callback_query: {
+      id: "cbq_1",
+      from: { id: 1, is_bot: false, first_name: "tester" },
+      chat_instance: "ci_1",
+      message: {
+        message_id: 5,
+        date: 0,
+        chat: { id: 1, type: "private" as const, first_name: "tester" },
+        text: "pending draft",
+      },
+      data,
+    },
+  };
+}
+
 let db: LocalDb;
 let deps: BotDeps;
 
@@ -179,5 +224,86 @@ describe("createBot - capture/query commands (issue #65)", () => {
     await botB.handleUpdate(textUpdate("/today"));
 
     expect(sentB[0]).toBe("Nothing due today.");
+  });
+});
+
+describe("createBot - gated approve/deny (issue #66)", () => {
+  it("/draft attaches an approve/deny inline keyboard to the confirmation message", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/draft announce the launch"));
+
+    const buttons = captured.messages[0].replyMarkup?.inline_keyboard[0] ?? [];
+    expect(buttons.map((b) => b.text)).toEqual(["Approve", "Deny"]);
+    expect(buttons[0].callback_data).toMatch(/^approve:ent_/);
+    expect(buttons[1].callback_data).toMatch(/^deny:ent_/);
+  });
+
+  it("tapping Approve resolves the draft and never calls a provider directly", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/draft announce the launch"));
+    const approveData = captured.messages[0].replyMarkup?.inline_keyboard[0][0].callback_data ?? "";
+
+    await bot.handleUpdate(callbackQueryUpdate(approveData));
+
+    expect(captured.answeredCallbacks[0]).toBe("Approved - queued for execution.");
+    expect(captured.edits[0]).toBe("Approved - queued for execution.");
+  });
+
+  it("tapping Deny resolves the draft with no job enqueued", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/draft announce the launch"));
+    const denyData = captured.messages[0].replyMarkup?.inline_keyboard[0][1].callback_data ?? "";
+
+    await bot.handleUpdate(callbackQueryUpdate(denyData));
+
+    expect(captured.answeredCallbacks[0]).toBe("Denied.");
+  });
+
+  it("a second tap on an already-resolved draft is a safe no-op, not a crash", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/draft announce the launch"));
+    const approveData = captured.messages[0].replyMarkup?.inline_keyboard[0][0].callback_data ?? "";
+
+    await bot.handleUpdate(callbackQueryUpdate(approveData));
+    await bot.handleUpdate(callbackQueryUpdate(approveData));
+
+    expect(captured.answeredCallbacks[1]).toMatch(/Already approved/);
+  });
+
+  it("/pending sends one message with buttons per pending draft", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/draft first draft"));
+    await bot.handleUpdate(textUpdate("/draft second draft"));
+    await bot.handleUpdate(textUpdate("/pending"));
+
+    // 2 confirmation replies from /draft + 2 /pending listing messages.
+    expect(captured.messages).toHaveLength(4);
+    expect(captured.messages[2].text).toContain("first draft");
+    expect(captured.messages[2].replyMarkup?.inline_keyboard[0].map((b) => b.text)).toEqual(["Approve", "Deny"]);
+  });
+
+  it("/pending says nothing is pending once everything is resolved", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const captured = captureAll(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/pending"));
+
+    expect(captured.messages[0].text).toBe("Nothing pending approval.");
   });
 });

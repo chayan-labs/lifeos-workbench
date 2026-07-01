@@ -40,6 +40,19 @@ CREATE TABLE events (
   eval_score REAL,
   gated INTEGER DEFAULT 0
 );
+CREATE TABLE jobs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'queued',
+  priority INTEGER DEFAULT 0,
+  run_after INTEGER,
+  claimed_by TEXT,
+  claimed_at INTEGER,
+  attempts INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 `;
 
 export async function createTestDb(): Promise<LocalDb> {

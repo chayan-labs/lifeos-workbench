@@ -1,9 +1,21 @@
-// grammY bot definition - issues #63-65. Gated approve/deny keyboards and
-// the heavy-job enqueue path land in #66-67.
-import { Bot } from "grammy";
+// grammY bot definition - issues #63-66. The heavy-job enqueue path (real
+// dispatch of #66's `execute_approval` jobs) lands in #67.
+import { Bot, InlineKeyboard } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { WorkerDb } from "@lifeos/db/client/worker";
-import { captureDraft, captureTask, captureTopic, inbox, markDone, pnl, quiz, today } from "./commands.js";
+import { approveEntity, denyEntity, listPendingApprovals } from "./approvals.js";
+import {
+  captureDraft,
+  captureTask,
+  captureTopic,
+  formatApprovalResult,
+  formatPendingApproval,
+  inbox,
+  markDone,
+  pnl,
+  quiz,
+  today,
+} from "./commands.js";
 
 export function healthMessage(): string {
   return "ok";
@@ -13,6 +25,13 @@ export interface BotDeps {
   token: string;
   db: WorkerDb;
   workspaceId: string;
+}
+
+const APPROVE_PREFIX = "approve:";
+const DENY_PREFIX = "deny:";
+
+function approvalKeyboard(entityId: string): InlineKeyboard {
+  return new InlineKeyboard().text("Approve", `${APPROVE_PREFIX}${entityId}`).text("Deny", `${DENY_PREFIX}${entityId}`);
 }
 
 // `botInfo` lets tests construct a Bot without a network call to Telegram's
@@ -38,7 +57,8 @@ export function createBot(deps: BotDeps, botInfo?: UserFromGetMe): Bot {
   });
 
   bot.command("draft", async (ctx) => {
-    await ctx.reply(await captureDraft(db, workspaceId, ctx.match));
+    const { reply, entity } = await captureDraft(db, workspaceId, ctx.match);
+    await ctx.reply(reply, entity ? { reply_markup: approvalKeyboard(entity.id) } : undefined);
   });
 
   bot.command("done", async (ctx) => {
@@ -59,6 +79,41 @@ export function createBot(deps: BotDeps, botInfo?: UserFromGetMe): Bot {
 
   bot.command("quiz", async (ctx) => {
     await ctx.reply(await quiz(db, workspaceId));
+  });
+
+  // issue #66: everything awaiting a tap, one message per draft (Telegram
+  // has no multi-item-keyboard primitive), each with its own approve/deny
+  // buttons.
+  bot.command("pending", async (ctx) => {
+    const pending = await listPendingApprovals(db, workspaceId);
+    if (pending.length === 0) {
+      await ctx.reply("Nothing pending approval.");
+      return;
+    }
+    for (const entity of pending) {
+      await ctx.reply(formatPendingApproval(entity), { reply_markup: approvalKeyboard(entity.id) });
+    }
+  });
+
+  bot.on("callback_query:data", async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    const isApprove = data.startsWith(APPROVE_PREFIX);
+    const isDeny = data.startsWith(DENY_PREFIX);
+    if (!isApprove && !isDeny) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const entityId = data.slice(isApprove ? APPROVE_PREFIX.length : DENY_PREFIX.length);
+    const result = isApprove ? await approveEntity(db, workspaceId, entityId) : await denyEntity(db, workspaceId, entityId);
+    const text = formatApprovalResult(result);
+
+    await ctx.answerCallbackQuery({ text });
+    await ctx.editMessageText(text).catch(() => {
+      // Original message may already be edited/gone (e.g. a second tap
+      // racing the first) - the answerCallbackQuery toast above already
+      // told the user the outcome either way.
+    });
   });
 
   return bot;

@@ -37,11 +37,18 @@ describe("captureTopic", () => {
 
 describe("captureDraft", () => {
   it("creates a pending_approval draft, never publishing anything", async () => {
-    const reply = await captureDraft(db, WS, "post about the launch");
+    const { reply, entity } = await captureDraft(db, WS, "post about the launch");
 
     expect(reply).toMatch(/awaiting approval/);
+    expect(entity?.status).toBe("pending_approval");
     const rows = await listEntities(db, WS, { module: "bot", type: "draft" });
     expect(rows[0].status).toBe("pending_approval");
+  });
+
+  it("returns no entity for empty input", async () => {
+    const { reply, entity } = await captureDraft(db, WS, "   ");
+    expect(reply).toMatch(/^Usage:/);
+    expect(entity).toBeNull();
   });
 });
 

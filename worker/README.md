@@ -15,8 +15,19 @@ and, later, OAuth callbacks. See `docs/ARCHITECTURE.md` §3.1 and `docs/BUILD-PL
   - `/pnl` - realized PnL summed from `trade.closed` events (read-only, never a broker call).
   - `/quiz` - spaced-repetition-style prompt, naive (oldest-untouched topic).
   - `/draft <text>` - creates a `pending_approval` entity; never publishes anything itself.
+- Issue #66: gated approve/deny (`src/approvals.ts`, `src/jobs.ts`, docs/SECURITY.md §2).
+  `/draft`'s confirmation message carries an inline Approve/Deny keyboard; `/pending` lists
+  every `pending_approval` entity in the workspace (not just bot-originated drafts) with the
+  same buttons. Tapping Approve transitions the entity to `approved`, records
+  `events('${type}.approved')`, and enqueues `jobs(kind='execute_approval')` for the Mac to
+  drain - the Worker never calls a provider directly. Tapping Deny records
+  `events('${type}.rejected')` and enqueues nothing. A second tap on an already-resolved
+  draft is a no-op, not a crash.
 
-Gated approve/deny keyboards and the heavy-job enqueue path land in #66-67.
+The real `execute_approval` job dispatch (actually calling Nango's proxy / the browser
+actuator / trade-exec) lands in #67 alongside the rest of the heavy-job enqueue path -
+`services/lifeos-drain`'s `dispatch()` doesn't recognize this job kind yet (its other kinds
+are stubs too).
 
 Every DB query in `src/entities.ts` filters by `workspace_id`, resolved server-side from
 `env.WORKSPACE_ID` (never from Telegram input) via `resolveWorkspaceId()` in `src/db.ts`.

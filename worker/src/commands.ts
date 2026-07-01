@@ -1,10 +1,11 @@
-// Capture/query command logic - issue #65. Kept as plain functions over
+// Capture/query command logic - issues #65/#66. Kept as plain functions over
 // (db, workspaceId, ...args) -> reply string, separate from bot.ts's grammY
 // wiring, so each command is testable without constructing a Context.
-// Everything here is a "medium action" per the issue's scope (an entity/
-// event read or write in the bot's own workspace) - nothing heavy/codegen
-// is triggered from a command yet, so there is nothing to enqueue to `jobs`
-// in this iteration.
+// Everything here is a "medium action" per #65's scope (an entity/event read
+// or write in the bot's own workspace); #66's /draft is the one exception -
+// an outward action - and it stays gated (creates a pending_approval row,
+// nothing more) exactly like every draft_action-backed route in
+// services/lifeos-api.
 import type { WorkerDb } from "@lifeos/db/client/worker";
 import {
   type Entity,
@@ -15,6 +16,7 @@ import {
   markTaskDoneBySuffix,
 } from "./entities.js";
 import { sumClosedTradePnl } from "./events.js";
+import type { ApprovalResult } from "./approvals.js";
 
 const SHORT_ID_LEN = 6;
 
@@ -43,13 +45,19 @@ export async function captureTopic(db: WorkerDb, workspaceId: string, text: stri
   return `Topic added to inbox [${shortId(entity.id)}]: ${title}`;
 }
 
+export interface CaptureDraftResult {
+  reply: string;
+  entity: Entity | null; // null only on the empty-input usage message
+}
+
 // Outward actions are human-gated (docs/ARCHITECTURE.md hard rules): this
 // only ever creates a pending_approval row, exactly like every
-// draft_action-backed route in services/lifeos-api. The Telegram-side
-// approve/deny keyboard that acts on it lands in #66.
-export async function captureDraft(db: WorkerDb, workspaceId: string, text: string): Promise<string> {
+// draft_action-backed route in services/lifeos-api. Returns the entity too
+// (not just a reply string, unlike the other capture commands) so bot.ts can
+// attach an approve/deny inline keyboard (issue #66) to the same message.
+export async function captureDraft(db: WorkerDb, workspaceId: string, text: string): Promise<CaptureDraftResult> {
   const body = text.trim();
-  if (!body) return "Usage: /draft <what to draft>";
+  if (!body) return { reply: "Usage: /draft <what to draft>", entity: null };
 
   const entity = await createEntity(db, workspaceId, {
     module: "bot",
@@ -58,7 +66,7 @@ export async function captureDraft(db: WorkerDb, workspaceId: string, text: stri
     attrs: { text: body },
     source: "telegram",
   });
-  return `Drafted [${shortId(entity.id)}], awaiting approval: ${body}`;
+  return { reply: `Drafted [${shortId(entity.id)}], awaiting approval: ${body}`, entity };
 }
 
 export async function markDone(db: WorkerDb, workspaceId: string, suffix: string): Promise<string> {
@@ -101,4 +109,23 @@ export async function quiz(db: WorkerDb, workspaceId: string): Promise<string> {
 
   const oldest = topics.reduce((least: Entity, t: Entity) => (t.updatedAt < least.updatedAt ? t : least));
   return `Quiz: what do you remember about "${oldest.title}"?`;
+}
+
+// issue #66: what a `/pending` listing shows above each item's approve/deny
+// buttons - drafts (module='bot', attrs.text) get their raw text, anything
+// else (draft_action-backed entities from services/lifeos-api, e.g.
+// slack_post/gmail_send) falls back to its title/module/type.
+export function formatPendingApproval(entity: Entity): string {
+  if (entity.module === "bot" && entity.type === "draft") {
+    const attrs = JSON.parse(entity.attrs) as { text?: string };
+    return `[${shortId(entity.id)}] ${attrs.text ?? "(no text)"}`;
+  }
+  return `[${shortId(entity.id)}] (${entity.module}/${entity.type}) ${entity.title ?? "(untitled)"}`;
+}
+
+export function formatApprovalResult(result: ApprovalResult): string {
+  if (result.outcome === "not_found") return "That draft no longer exists.";
+  if (result.outcome === "already_resolved") return `Already ${result.entity.status} - no change.`;
+  if (result.outcome === "approved") return "Approved - queued for execution.";
+  return "Denied.";
 }
