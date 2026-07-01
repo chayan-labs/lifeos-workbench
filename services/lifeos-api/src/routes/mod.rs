@@ -1,18 +1,23 @@
 //! HTTP surface for `lifeos-api`. One handler module per resource group.
 
+mod calendar;
 mod connection;
+mod drive;
 mod entity;
 mod event;
+mod gmail;
 mod health;
 mod job;
 mod kite;
 mod llm;
 mod metrics;
 mod module_request;
+mod notion;
 mod planned;
 mod register;
 mod edge;
 mod search;
+mod slack;
 mod stream;
 mod whatsapp;
 mod workspace;
@@ -64,6 +69,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/connections/whatsapp/status", get(whatsapp::status))
         .route("/api/webhooks/whatsapp", post(whatsapp::webhook))
         .route("/api/whatsapp/send", post(whatsapp::send))
+        // --- per-provider Nango proxy thin tools (issue #53): reads proxy
+        //     straight through, writes only ever draft (docs/SECURITY.md §2) ---
+        .route("/api/gmail/list", get(gmail::list))
+        .route("/api/gmail/send", post(gmail::send))
+        .route("/api/calendar/list", get(calendar::list))
+        .route("/api/calendar/create", post(calendar::create))
+        .route("/api/drive/list", get(drive::list))
+        .route("/api/drive/upload", post(drive::upload))
+        .route("/api/notion/list", get(notion::list))
+        .route("/api/notion/create", post(notion::create))
+        .route("/api/slack/list", get(slack::list))
+        .route("/api/slack/post", post(slack::post))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---

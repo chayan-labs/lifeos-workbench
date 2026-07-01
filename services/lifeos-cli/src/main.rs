@@ -35,6 +35,11 @@ async fn main() -> ExitCode {
         Commands::Edge { cmd } => commands::data::edge(&client, out, cmd).await,
         Commands::Event { cmd } => commands::data::event(&client, out, cmd).await,
         Commands::Job { cmd } => commands::data::job(&client, out, cmd).await,
+        Commands::Gmail { cmd } => commands::integrations::gmail(&client, out, cmd).await,
+        Commands::Calendar { cmd } => commands::integrations::calendar(&client, out, cmd).await,
+        Commands::Drive { cmd } => commands::integrations::drive(&client, out, cmd).await,
+        Commands::Notion { cmd } => commands::integrations::notion(&client, out, cmd).await,
+        Commands::Slack { cmd } => commands::integrations::slack(&client, out, cmd).await,
         Commands::File { cmd } => commands::misc::file(&client, out, cmd).await,
     };
     finish(result)

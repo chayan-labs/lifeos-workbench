@@ -7,7 +7,7 @@
 use crate::error::{ApiError, ApiResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EndUser {
@@ -40,6 +40,20 @@ pub trait NangoClient: Send + Sync {
     async fn get_connection(&self, connection_id: &str, provider_config_key: &str) -> ApiResult<NangoConnection>;
 
     async fn delete_connection(&self, connection_id: &str, provider_config_key: &str) -> ApiResult<()>;
+
+    /// Call a provider endpoint through Nango's proxy - the token is injected
+    /// server-side by Nango and never reaches this process's caller. Used by
+    /// the per-provider thin tools (issue #53, docs/INTEGRATIONS.md) for both
+    /// free reads and any write we choose not to gate at the entity layer.
+    async fn proxy(
+        &self,
+        connection_id: &str,
+        provider_config_key: &str,
+        method: &str,
+        endpoint: &str,
+        query: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> ApiResult<Value>;
 }
 
 /// Real implementation, calling the self-hosted Nango REST API.
@@ -104,6 +118,31 @@ impl NangoClient for HttpNangoClient {
             Err(ApiError::Upstream("nango rejected delete_connection".into()))
         }
     }
+
+    async fn proxy(
+        &self,
+        connection_id: &str,
+        provider_config_key: &str,
+        method: &str,
+        endpoint: &str,
+        query: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> ApiResult<Value> {
+        let http_method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|_| ApiError::BadRequest(format!("invalid proxy method '{method}'")))?;
+        let mut req = self
+            .http
+            .request(http_method, format!("{}/proxy/{}", self.base_url, endpoint.trim_start_matches('/')))
+            .header("Connection-Id", connection_id)
+            .header("Provider-Config-Key", provider_config_key)
+            .bearer_auth(&self.secret_key)
+            .query(query);
+        if let Some(b) = &body {
+            req = req.json(b);
+        }
+        let resp = req.send().await.map_err(nango_unreachable)?;
+        decode_ok(resp, "proxy").await
+    }
 }
 
 fn nango_unreachable(e: reqwest::Error) -> ApiError {
@@ -131,11 +170,20 @@ pub mod mock {
 
     pub struct MockNangoClient {
         connections: Mutex<std::collections::HashMap<String, NangoConnection>>,
+        /// "{provider_config_key}:{method}:{endpoint}" -> canned response.
+        proxy_responses: Mutex<std::collections::HashMap<String, Value>>,
+        /// Every proxy call made, in order - lets tests assert a gated draft
+        /// path never actually reached the provider.
+        pub calls: Mutex<Vec<String>>,
     }
 
     impl MockNangoClient {
         pub fn new() -> Self {
-            Self { connections: Mutex::new(std::collections::HashMap::new()) }
+            Self {
+                connections: Mutex::new(std::collections::HashMap::new()),
+                proxy_responses: Mutex::new(std::collections::HashMap::new()),
+                calls: Mutex::new(Vec::new()),
+            }
         }
 
         /// Seed a connection as if a real OAuth flow had already completed.
@@ -147,6 +195,15 @@ pub mod mock {
                     provider_config_key: provider_config_key.to_string(),
                 },
             );
+        }
+
+        /// Seed the response a `proxy()` call should return for this exact
+        /// (provider, method, endpoint) triple.
+        pub fn seed_proxy(&self, provider_config_key: &str, method: &str, endpoint: &str, response: Value) {
+            self.proxy_responses
+                .lock()
+                .unwrap()
+                .insert(format!("{provider_config_key}:{method}:{endpoint}"), response);
         }
     }
 
@@ -179,6 +236,25 @@ pub mod mock {
         async fn delete_connection(&self, connection_id: &str, _provider_config_key: &str) -> ApiResult<()> {
             self.connections.lock().unwrap().remove(connection_id);
             Ok(())
+        }
+
+        async fn proxy(
+            &self,
+            _connection_id: &str,
+            provider_config_key: &str,
+            method: &str,
+            endpoint: &str,
+            _query: &[(&str, &str)],
+            _body: Option<Value>,
+        ) -> ApiResult<Value> {
+            let key = format!("{provider_config_key}:{method}:{endpoint}");
+            self.calls.lock().unwrap().push(key.clone());
+            self.proxy_responses
+                .lock()
+                .unwrap()
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| ApiError::Upstream(format!("no mock proxy response seeded for '{key}'")))
         }
     }
 }

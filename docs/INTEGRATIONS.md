@@ -46,6 +46,14 @@ This is not only safer - it is the exact model multi-tenant SaaS requires, so we
 
 **One-time owned setup:** one Google Cloud project (covers Gmail+Calendar+Drive), one Notion integration, one Slack app, one Meta app (IG only), one X app, one Reddit app, one GitHub app, one Figma app, one Kite app, plus self-hosting `infra/gowa/` and pairing a WhatsApp number by QR scan (no Meta app needed for WhatsApp). You fully own all of them.
 
+**Implemented (issue #53):** Gmail, Calendar, Drive, Notion, and Slack each have a thin route pair in `lifeos-api` -
+`GET /api/<provider>/list` (free read, proxies straight through Nango) and one gated write
+(`POST /api/gmail/send`, `/api/calendar/create`, `/api/drive/upload`, `/api/notion/create`, `/api/slack/post`) that
+only ever creates a `pending_approval` draft entity - the handler has no code path to the provider at all (see
+`services/lifeos-api/src/integrations.rs`). Reachable from the CLI as `lifeos gmail list`, `lifeos slack post`, etc.
+Each `list` 404s until its provider's OAuth app is registered (#48/#49) and a connection is completed - no
+per-provider code is missing, only the manual credential step in `docs/MANUAL-SETUP.md`.
+
 ---
 
 ## 3. Nango details

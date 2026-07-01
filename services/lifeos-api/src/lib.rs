@@ -9,6 +9,7 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod ids;
+pub mod integrations;
 pub mod kite;
 pub mod models;
 pub mod nango;

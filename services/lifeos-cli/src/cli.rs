@@ -50,6 +50,31 @@ pub enum Commands {
     },
     /// Workspace metrics rollup.
     Metrics,
+    /// Gmail: thin proxy read + gated draft (issue #53).
+    Gmail {
+        #[command(subcommand)]
+        cmd: GmailCmd,
+    },
+    /// Google Calendar: thin proxy read + gated draft (issue #53).
+    Calendar {
+        #[command(subcommand)]
+        cmd: CalendarCmd,
+    },
+    /// Google Drive: thin proxy read + gated draft (issue #53).
+    Drive {
+        #[command(subcommand)]
+        cmd: DriveCmd,
+    },
+    /// Notion: thin proxy read + gated draft (issue #53).
+    Notion {
+        #[command(subcommand)]
+        cmd: NotionCmd,
+    },
+    /// Slack: thin proxy read + gated draft (issue #53).
+    Slack {
+        #[command(subcommand)]
+        cmd: SlackCmd,
+    },
     /// File versioning via lifeos-vcs (history/commit).
     File {
         #[command(subcommand)]
@@ -196,6 +221,78 @@ pub enum FileCmd {
         message: Option<String>,
         #[arg(long)]
         entity_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GmailCmd {
+    /// Free read: proxies to Gmail's `messages.list`.
+    List {
+        #[arg(long)]
+        q: Option<String>,
+    },
+    /// Gated (docs/SECURITY.md §2): only creates a draft entity.
+    Send {
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        body: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CalendarCmd {
+    /// Free read: proxies to `events.list` on the primary calendar.
+    List,
+    /// Gated (docs/SECURITY.md §2): only creates a draft entity.
+    Create {
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DriveCmd {
+    /// Free read: proxies to `files.list`.
+    List,
+    /// Gated (docs/SECURITY.md §2): only creates a draft entity.
+    Upload {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        source_ref: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum NotionCmd {
+    /// Free read: proxies to Notion's `/v1/search`.
+    List,
+    /// Gated (docs/SECURITY.md §2): only creates a draft entity.
+    Create {
+        #[arg(long)]
+        parent_id: String,
+        #[arg(long)]
+        title: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SlackCmd {
+    /// Free read: proxies to `conversations.list`.
+    List,
+    /// Gated (docs/SECURITY.md §2): only creates a draft entity.
+    Post {
+        #[arg(long)]
+        channel: String,
+        #[arg(long)]
+        text: String,
     },
 }
 
