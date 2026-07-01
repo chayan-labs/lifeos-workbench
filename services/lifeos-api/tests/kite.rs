@@ -52,6 +52,9 @@ async fn test_app(with_kite: bool) -> TestApp {
         kite_api_key: with_kite.then(|| "test-api-key".to_string()),
         kite_api_secret: with_kite.then(|| "test-api-secret".to_string()),
         secret_encryption_key: with_kite.then(|| crypto::parse_key(&base64_key()).unwrap()),
+        gowa_base_url: None,
+        gowa_basic_auth: None,
+        gowa_webhook_secret: None,
     };
     let kite = Arc::new(MockKiteClient::new());
     let state = build_state_with_kite(config, if with_kite { Some(kite.clone()) } else { None })

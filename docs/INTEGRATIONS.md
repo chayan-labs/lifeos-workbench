@@ -37,14 +37,14 @@ This is not only safer - it is the exact model multi-tenant SaaS requires, so we
 | Instagram | Nango | your Meta app | free | 🔒 publish |
 | X / Twitter | Nango | your X app | free | 🔒 publish |
 | Reddit | Nango | your Reddit app | free | 🔒 post |
-| WhatsApp | **native** WhatsApp Business Cloud API (custom connector) | your Meta app | free | 🔒 send |
+| WhatsApp | **native**, self-hosted [go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice) (GOWA, `infra/gowa/`) - no Meta app, QR-pair like WhatsApp Web | your WhatsApp number (device-paired) | free | 🔒 send |
 | Zerodha Kite | **native** custom connector (daily request-token, read-scoped) | your Kite app | free (read-only) | **never** (see SECURITY.md) |
 | Figma | mcp-figma (on-demand) + Nango for file metadata | your Figma app | free | gated writes |
 | Higgsfield | mcp-higgsfield (on-demand, OAuth) | your account | n/a | generate |
 | GitHub | Nango `github` (or octocrab in the Rust API) | your GitHub app | free | issues/PRs free; 🔒 merge/release |
 | Any no-API service | **browser actuator** (§4) | encrypted browser session | free | 🔒 everything |
 
-**One-time owned setup:** one Google Cloud project (covers Gmail+Calendar+Drive), one Notion integration, one Slack app, one Meta app (IG+WhatsApp), one X app, one Reddit app, one GitHub app, one Figma app, one Kite app. You fully own all of them.
+**One-time owned setup:** one Google Cloud project (covers Gmail+Calendar+Drive), one Notion integration, one Slack app, one Meta app (IG only), one X app, one Reddit app, one GitHub app, one Figma app, one Kite app, plus self-hosting `infra/gowa/` and pairing a WhatsApp number by QR scan (no Meta app needed for WhatsApp). You fully own all of them.
 
 ---
 
@@ -53,7 +53,7 @@ This is not only safer - it is the exact model multi-tenant SaaS requires, so we
 - **License:** Elastic License 2.0 (source-available). Free to self-host as an internal vault; the only restriction is "don't resell Nango-itself as a managed service" - which Life OS never does. The docker-compose edition covers managed-auth + proxy (the Helm/full self-host path is Enterprise-gated, not needed).
 - **Deployment:** runs on the trusted Mac (or a tiny always-on host). Owns OAuth callback URLs. The Cloudflare Worker's only integration role is to forward callbacks if the always-on host is the Worker; it never stores a token.
 - **`connections` mapping:** each connected account = one `connections` row carrying `provider`, `account_handle`, `nango_connection_id`. Many accounts per provider = many `connectionId`s. See [DATA-MODEL.md](./DATA-MODEL.md) §3.
-- **Custom connectors** (Kite, WhatsApp) that Nango doesn't model cleanly store an envelope-encrypted secret in `connections.secret_enc` and are called by bespoke code in the Rust API - still never in agent context.
+- **Custom connectors** (Kite; WhatsApp via self-hosted `infra/gowa/`) that Nango doesn't model cleanly are called by bespoke code in the Rust API - still never in agent context. Kite's daily token is envelope-encrypted in `connections.secret_enc`; WhatsApp has no per-workspace secret to encrypt (GOWA auth is one server-wide Basic Auth credential lifeos-api alone holds).
 - **If ELv2 ever conflicts** (it won't for our use): fork Nango (ELv2 permits), or fall back to OpenBao (MPL-2.0) for the vault + hand-rolled OAuth for our ~8 providers (an excellent Rust task). No fully-MIT drop-in equivalent exists - this is the one "might build ourselves" risk. See [LICENSING-REUSE.md](./LICENSING-REUSE.md).
 
 ---

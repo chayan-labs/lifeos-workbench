@@ -14,6 +14,7 @@ mod register;
 mod edge;
 mod search;
 mod stream;
+mod whatsapp;
 mod workspace;
 
 use crate::state::AppState;
@@ -57,6 +58,12 @@ pub fn router(state: AppState) -> Router {
         // --- Kite Connect: native custom connector, read-only (issue #51) ---
         .route("/api/connections/kite/login-url", get(kite::login_url_handler))
         .route("/api/connections/kite/complete", post(kite::complete))
+        // --- WhatsApp via self-hosted GOWA: QR pairing, no send route (issue #52) ---
+        .route("/api/connections/whatsapp/session", post(whatsapp::start_session))
+        .route("/api/connections/whatsapp/qr", get(whatsapp::qr))
+        .route("/api/connections/whatsapp/status", get(whatsapp::status))
+        .route("/api/webhooks/whatsapp", post(whatsapp::webhook))
+        .route("/api/whatsapp/send", post(whatsapp::send))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---

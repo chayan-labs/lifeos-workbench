@@ -82,11 +82,11 @@ No new code needed - each is `POST /api/connections/session
   `http://localhost:3003/oauth/callback`. (Bulk of Figma access is via
   mcp-figma at runtime - this Nango connection is only for file *metadata*.)
 
-### #50 - Meta (Instagram + WhatsApp) / X / Reddit apps
+### #50 - Meta (Instagram) / X / Reddit apps
 
 No new code needed for Instagram/X/Reddit - same pattern as #49. WhatsApp
-Business Cloud is a native custom connector (not Nango), tracked separately
-as #52.
+is not a Meta Cloud API connector - it's a self-hosted native connector
+(GOWA/whatsmeow), tracked separately as #52.
 
 - **Meta app** (developers.facebook.com/apps -> Create App -> type
   "Business"): add the Instagram Graph API product, request
@@ -137,3 +137,63 @@ belt-and-suspenders). Bringing up a real connection needs you:
    `/api/connections`/`/api/broker/positions` response body - only
    `account_handle`/`status`/`provider` should be visible for the connection,
    and `positions` returns Kite's data with no token field.
+
+### #52 - WhatsApp via self-hosted GOWA (QR-pair, no Meta app)
+
+WhatsApp is a native custom connector too, but unlike Kite it needs no paid
+developer account and no app registration at all - `infra/gowa/` runs
+[go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice)
+(GOWA, MIT), a REST wrapper around `whatsmeow` that talks to WhatsApp's own
+protocol directly, the same way WhatsApp Web does. GOWA has a real
+multi-tenant device API - each workspace gets its own GOWA "device" keyed by
+`device_id = workspace_id` - and a single server-wide webhook, so there's no
+per-workspace secret to mint or encrypt this time (`connections.secret_enc`
+stays `NULL` for WhatsApp rows; GOWA auth is one shared Basic Auth
+credential lifeos-api alone holds). Inbound messages are captured
+(`entities` with `module='integrations', type='whatsapp_message'`); sending
+is gated - `POST /api/whatsapp/send` only creates a draft entity, it never
+calls GOWA (the approve+execute leg ships with the Bot/executor phase, not
+here).
+
+**:warning: Read this before pairing a number:** GOWA's own README warns
+this drives a real WhatsApp account over its consumer protocol - using it
+for spam, bulk sends, or anything automated at scale risks WhatsApp banning
+the number. Fine for personal use (which is all this connects to today);
+don't repurpose it for bulk outbound without understanding that risk.
+
+1. **Bring up GOWA** (from `infra/gowa/`):
+   ```sh
+   cp .env.example .env
+   openssl rand -hex 16      # -> the password half of GOWA_BASIC_AUTH (format: user:pass)
+   openssl rand -base64 32   # -> GOWA_WEBHOOK_SECRET (must match lifeos-api's GOWA_WEBHOOK_SECRET exactly)
+   docker compose up -d
+   ```
+   Check the pinned image tag in `infra/gowa/docker-compose.yml` still
+   exists on Docker Hub before this step - bump it if the upstream project
+   has moved on.
+
+2. **Set lifeos-api's env**: `GOWA_BASE_URL` (e.g. `http://127.0.0.1:8082`),
+   `GOWA_BASIC_AUTH` (same `user:pass` as step 1), `GOWA_WEBHOOK_SECRET`
+   (same value as above). Until all three are set,
+   `/api/connections/whatsapp/*` and `/api/webhooks/whatsapp` return 501.
+
+3. **Pair a device**: `POST /api/connections/whatsapp/session`, then
+   `GET /api/connections/whatsapp/qr` and open the returned `qr_link` (a
+   GOWA-served image URL, local network only) - scan it with the WhatsApp
+   mobile app (Linked Devices -> Link a Device) on the number you want
+   connected. Poll `GET /api/connections/whatsapp/status` until
+   `connected: true`.
+
+4. **Wire the inbound webhook** (optional, needed for message capture): set
+   `WHATSAPP_WEBHOOK` in `infra/gowa/.env` to a publicly-reachable URL for
+   this API's `/api/webhooks/whatsapp` (a tunnel like ngrok/Cloudflare
+   Tunnel during dev, since GOWA runs outside this Mac's localhost from
+   WhatsApp's point of view) *before* bringing GOWA up - unlike the earlier
+   wuzapi design this is a static, server-wide setting, not something
+   lifeos-api registers dynamically. Leave it blank to skip inbound capture
+   entirely; pairing and the gated send-draft still work without it.
+
+5. **Smoke test**: send yourself a WhatsApp message from another device -
+   an `entities` row (`module='integrations', type='whatsapp_message'`)
+   should appear. Confirm the GOWA Basic Auth credential never appears in
+   any `/api/connections` response body.

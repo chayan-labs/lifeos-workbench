@@ -46,6 +46,9 @@ async fn test_app(with_nango: bool) -> TestApp {
     kite_api_key: None,
     kite_api_secret: None,
     secret_encryption_key: None,
+    gowa_base_url: None,
+    gowa_basic_auth: None,
+    gowa_webhook_secret: None,
     };
     let nango = Arc::new(MockNangoClient::new());
     let state = build_state_with_nango(config, if with_nango { Some(nango.clone()) } else { None })

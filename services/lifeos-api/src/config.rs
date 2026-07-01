@@ -45,11 +45,23 @@ pub struct Config {
     /// NotImplemented rather than pretending Kite is wired up.
     pub kite_api_key: Option<String>,
     pub kite_api_secret: Option<String>,
-    /// AES-256-GCM master key (32 raw bytes, base64) for `connections.secret_enc`
-    /// - the envelope used by non-Nango connectors (Kite now, WhatsApp in #52).
-    /// `None` disables those connectors entirely; a secret is never stored
-    /// unencrypted.
+    /// AES-256-GCM master key (32 raw bytes, base64) for `connections.secret_enc`,
+    /// the envelope used by non-Nango connectors (Kite now, WhatsApp in #52).
+    /// `None` disables those connectors entirely; a secret is never stored unencrypted.
     pub secret_encryption_key: Option<crate::crypto::EncryptionKey>,
+    /// Base URL of the self-hosted GOWA instance (infra/gowa/,
+    /// docs/MANUAL-SETUP.md #52). `None` means the WhatsApp routes return
+    /// NotImplemented.
+    pub gowa_base_url: Option<String>,
+    /// GOWA's server-wide Basic Auth credential (`"user:pass"`) - the only
+    /// secret WhatsApp needs, since GOWA has no per-workspace token to mint
+    /// (unlike Kite's daily access_token). Never sent to the client, never
+    /// logged (docs/SECURITY.md §1).
+    pub gowa_basic_auth: Option<String>,
+    /// Shared secret used to verify `X-Hub-Signature-256` on inbound
+    /// `/api/webhooks/whatsapp` calls - must match GOWA's own
+    /// `WHATSAPP_WEBHOOK_SECRET` (infra/gowa/.env).
+    pub gowa_webhook_secret: Option<String>,
 }
 
 impl Config {
@@ -101,6 +113,10 @@ impl Config {
                 }
             });
 
+        let gowa_base_url = std::env::var("GOWA_BASE_URL").ok().filter(|s| !s.is_empty());
+        let gowa_basic_auth = std::env::var("GOWA_BASIC_AUTH").ok().filter(|s| !s.is_empty());
+        let gowa_webhook_secret = std::env::var("GOWA_WEBHOOK_SECRET").ok().filter(|s| !s.is_empty());
+
         Self {
             db_path,
             turso_url,
@@ -116,6 +132,9 @@ impl Config {
             kite_api_key,
             kite_api_secret,
             secret_encryption_key,
+            gowa_base_url,
+            gowa_basic_auth,
+            gowa_webhook_secret,
         }
     }
 }

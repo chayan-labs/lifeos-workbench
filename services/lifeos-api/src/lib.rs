@@ -15,12 +15,21 @@ pub mod nango;
 pub mod reconcile;
 pub mod routes;
 pub mod state;
+pub mod whatsapp;
 
 use crate::config::Config;
 use crate::kite::{HttpKiteClient, KiteClient};
 use crate::nango::{HttpNangoClient, NangoClient};
 use crate::state::AppState;
+use crate::whatsapp::{HttpWhatsAppClient, WhatsAppClient};
 use std::sync::Arc;
+
+fn nango_from_config(config: &Config) -> Option<Arc<dyn NangoClient>> {
+    match (&config.nango_server_url, &config.nango_secret_key) {
+        (Some(url), Some(key)) => Some(Arc::new(HttpNangoClient::new(url.clone(), key.clone()))),
+        _ => None,
+    }
+}
 
 fn kite_from_config(config: &Config) -> Option<Arc<dyn KiteClient>> {
     match (&config.kite_api_key, &config.kite_api_secret, &config.secret_encryption_key) {
@@ -31,55 +40,65 @@ fn kite_from_config(config: &Config) -> Option<Arc<dyn KiteClient>> {
     }
 }
 
+fn whatsapp_from_config(config: &Config) -> Option<Arc<dyn WhatsAppClient>> {
+    match (&config.gowa_base_url, &config.gowa_basic_auth) {
+        (Some(url), Some(auth)) => Some(Arc::new(HttpWhatsAppClient::new(url.clone(), auth.clone()))),
+        _ => None,
+    }
+}
+
 /// Open the DB, detect agents, and assemble shared state from a config.
-/// Wires the real HTTP Nango client when `nango_server_url`/`nango_secret_key`
-/// are both configured, and the real Kite client when a Kite app + encryption
-/// key are configured; `None` otherwise (routes then surface a clean
-/// NotImplemented - see docs/MANUAL-SETUP.md #47-55).
+/// Wires the real HTTP Nango client, Kite client, and WhatsApp (GOWA)
+/// client whenever their respective config is present; `None` otherwise
+/// (routes then surface a clean NotImplemented - see docs/MANUAL-SETUP.md #47-52).
 pub async fn build_state(config: Config) -> Result<AppState, libsql::Error> {
-    let nango: Option<Arc<dyn NangoClient>> =
-        match (&config.nango_server_url, &config.nango_secret_key) {
-            (Some(url), Some(key)) => {
-                Some(Arc::new(HttpNangoClient::new(url.clone(), key.clone())))
-            }
-            _ => None,
-        };
+    let nango = nango_from_config(&config);
     let kite = kite_from_config(&config);
-    build_state_with_clients(config, nango, kite).await
+    let whatsapp = whatsapp_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp).await
 }
 
 /// Same as `build_state`, but with an explicit Nango client (or `None`) -
 /// lets tests inject `nango::mock::MockNangoClient` instead of hitting a real
-/// deployment. The Kite client is still wired from `config` if configured.
+/// deployment. Kite/WhatsApp clients are still wired from `config` if configured.
 pub async fn build_state_with_nango(
     config: Config,
     nango: Option<Arc<dyn NangoClient>>,
 ) -> Result<AppState, libsql::Error> {
     let kite = kite_from_config(&config);
-    build_state_with_clients(config, nango, kite).await
+    let whatsapp = whatsapp_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp).await
 }
 
 /// Same as `build_state`, but with an explicit Kite client (or `None`) - lets
-/// tests inject `kite::mock::MockKiteClient`. The Nango client is still wired
-/// from `config` if configured.
+/// tests inject `kite::mock::MockKiteClient`. Nango/WhatsApp clients are
+/// still wired from `config` if configured.
 pub async fn build_state_with_kite(
     config: Config,
     kite: Option<Arc<dyn KiteClient>>,
 ) -> Result<AppState, libsql::Error> {
-    let nango: Option<Arc<dyn NangoClient>> =
-        match (&config.nango_server_url, &config.nango_secret_key) {
-            (Some(url), Some(key)) => {
-                Some(Arc::new(HttpNangoClient::new(url.clone(), key.clone())))
-            }
-            _ => None,
-        };
-    build_state_with_clients(config, nango, kite).await
+    let nango = nango_from_config(&config);
+    let whatsapp = whatsapp_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp).await
+}
+
+/// Same as `build_state`, but with an explicit WhatsApp client (or `None`) -
+/// lets tests inject `whatsapp::mock::MockWhatsAppClient`. Nango/Kite clients
+/// are still wired from `config` if configured.
+pub async fn build_state_with_whatsapp(
+    config: Config,
+    whatsapp: Option<Arc<dyn WhatsAppClient>>,
+) -> Result<AppState, libsql::Error> {
+    let nango = nango_from_config(&config);
+    let kite = kite_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp).await
 }
 
 async fn build_state_with_clients(
     config: Config,
     nango: Option<Arc<dyn NangoClient>>,
     kite: Option<Arc<dyn KiteClient>>,
+    whatsapp: Option<Arc<dyn WhatsAppClient>>,
 ) -> Result<AppState, libsql::Error> {
     let db = db::connect(&config).await?;
     let agents = agents::detect();
@@ -90,5 +109,6 @@ async fn build_state_with_clients(
         agents: Arc::new(agents),
         nango,
         kite,
+        whatsapp,
     })
 }

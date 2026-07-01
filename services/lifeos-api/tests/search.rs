@@ -45,6 +45,9 @@ async fn test_app() -> TestApp {
     kite_api_key: None,
     kite_api_secret: None,
     secret_encryption_key: None,
+    gowa_base_url: None,
+    gowa_basic_auth: None,
+    gowa_webhook_secret: None,
     };
     let state = build_state(config).await.expect("build state");
     TestApp { router: routes::router(state), db_path, derived }

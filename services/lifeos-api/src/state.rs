@@ -4,6 +4,7 @@ use crate::agents::DetectedAgent;
 use crate::config::Config;
 use crate::kite::KiteClient;
 use crate::nango::NangoClient;
+use crate::whatsapp::WhatsAppClient;
 use libsql::{Connection, Database};
 use std::sync::Arc;
 
@@ -26,6 +27,11 @@ pub struct AppState {
     /// `/api/broker/positions` surface NotImplemented rather than pretending.
     /// Deliberately read-only: see `kite::KiteClient`.
     pub kite: Option<Arc<dyn KiteClient>>,
+    /// Self-hosted GOWA client. `None` until infra/gowa/ is deployed
+    /// (docs/MANUAL-SETUP.md #52) - `/api/connections/whatsapp/*` and
+    /// `/api/webhooks/whatsapp` surface NotImplemented rather than
+    /// pretending. Deliberately has no send capability: see `whatsapp::WhatsAppClient`.
+    pub whatsapp: Option<Arc<dyn WhatsAppClient>>,
 }
 
 impl AppState {

@@ -114,13 +114,6 @@ fn kite_unreachable(e: reqwest::Error) -> ApiError {
     ApiError::Upstream("kite unreachable".into())
 }
 
-/// std-only hex encode - avoids pulling in a whole crate for one call site.
-mod hex {
-    pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
-    }
-}
-
 /// In-memory fake for tests - no real Kite account/app needed to exercise the
 /// API surface. Exposed unconditionally so `tests/` can construct one too.
 pub mod mock {
