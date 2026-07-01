@@ -1,15 +1,19 @@
 mod blob;
 mod chunk;
 mod commit;
+mod gc;
 mod hash;
 mod mirror;
+mod snapshot;
 mod store;
 
 pub use blob::{read_blob, store_blob, BlobManifest};
 pub use chunk::{chunk_reader, ChunkRef};
 pub use commit::{commit_version, history, VersionEntry};
+pub use gc::{live_object_hashes, mark_and_sweep, GcError, GcReport};
 pub use hash::hash_bytes;
 pub use mirror::{pull_on_demand, BlobMirror, MirrorError};
+pub use snapshot::{all_ref_snapshots, create_snapshot, get_ref, read_snapshot, set_branch, set_tag, SnapshotError, SnapshotManifest};
 pub use store::ObjectStore;
 
 #[cfg(test)]

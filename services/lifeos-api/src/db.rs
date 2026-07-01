@@ -18,6 +18,9 @@ const MIGRATION_DERIVED: &str = include_str!("../../../migrations/0003_derived.s
 /// IF NOT EXISTS` migrations above - `add_column_if_missing` below guards it.
 const MIGRATION_MODULE_REQUESTS_CHAT_ID: &str =
     include_str!("../../../migrations/0004_module_requests_chat_id.sql");
+/// `vcs_refs` (lifeos-vcs branch/tag pointers, issue #84) - a new `CREATE
+/// TABLE IF NOT EXISTS`, naturally idempotent like core/control.
+const MIGRATION_VCS_REFS: &str = include_str!("../../../migrations/0005_vcs_refs.sql");
 
 /// The canonical DB plus its live connection. `database` is retained by the caller
 /// so the embedded-replica's background replicator stays alive (dropping it would
@@ -141,6 +144,7 @@ pub async fn run_migrations(conn: &Connection) -> Result<(), libsql::Error> {
     conn.execute_batch(MIGRATION_CORE).await?;
     conn.execute_batch(MIGRATION_CONTROL).await?;
     add_column_if_missing(conn, "module_requests", "chat_id", MIGRATION_MODULE_REQUESTS_CHAT_ID).await?;
+    conn.execute_batch(MIGRATION_VCS_REFS).await?;
     tracing::info!("migrations applied (core + control plane)");
     Ok(())
 }

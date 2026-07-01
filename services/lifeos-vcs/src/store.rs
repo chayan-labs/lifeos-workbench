@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Content-addressed object store rooted at `<root>/objects/<hh>/<hash>`,
 /// where `<hh>` is the first two hex chars of the BLAKE3 hash (docs/VERSIONING.md §2.1).
@@ -11,6 +11,10 @@ pub struct ObjectStore {
 impl ObjectStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     fn object_path(&self, hash: &str) -> PathBuf {
