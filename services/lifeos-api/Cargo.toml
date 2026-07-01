@@ -25,6 +25,7 @@ rand = "0.8"
 hmac = "0.12"
 hex = "0.4"
 lifeos-vcs = { path = "../lifeos-vcs" }
+scraper = "0.20"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

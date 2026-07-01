@@ -492,6 +492,40 @@ export const SLACK_MANIFEST = {
   ],
 };
 
+// `reading.save` and `reading.highlight` are both free (no Nango/OAuth
+// credential needed - fetching a public URL needs no owned credentials,
+// services/lifeos-api/src/routes/reading.rs). There is no bulk sync button
+// here (unlike Email/Calendar/Files/Notion/Slack) because Reading has no
+// external inbox to poll - articles are saved one URL at a time, so this
+// manifest declares no `sync` block.
+export const READING_MANIFEST = {
+  id: 'reading',
+  name: 'Reading',
+  icon: '📚',
+  entityTypes: {
+    article: {
+      label: 'Article',
+      plural: 'Articles',
+      display: { title: 'title', subtitle: (e) => e.attrs?.url, badge: 'read_state' },
+    },
+    highlight: {
+      label: 'Highlight',
+      plural: 'Highlights',
+      display: { title: (e) => e.attrs?.quote, subtitle: (e) => e.attrs?.color },
+    },
+    source: {
+      label: 'Source',
+      plural: 'Sources',
+      display: { title: (e) => e.attrs?.domain },
+    },
+  },
+  views: [
+    { id: 'articles', label: 'Articles', kind: 'list', type: 'article' },
+    { id: 'highlights', label: 'Highlights', kind: 'list', type: 'highlight' },
+    { id: 'sources', label: 'Sources', kind: 'list', type: 'source' },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -505,6 +539,7 @@ export const MODULE_MANIFESTS = {
   files: FILES_MANIFEST,
   notion: NOTION_MANIFEST,
   slack: SLACK_MANIFEST,
+  reading: READING_MANIFEST,
 };
 
 export function getManifest(id) {

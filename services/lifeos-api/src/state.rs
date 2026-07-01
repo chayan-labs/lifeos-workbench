@@ -5,6 +5,7 @@ use crate::browser::BrowserActuator;
 use crate::config::Config;
 use crate::kite::KiteClient;
 use crate::nango::NangoClient;
+use crate::reading::ArticleFetcher;
 use crate::whatsapp::WhatsAppClient;
 use libsql::{Connection, Database};
 use std::sync::Arc;
@@ -39,6 +40,11 @@ pub struct AppState {
     /// NotImplemented rather than pretending. Deliberately has no method for
     /// arbitrary state-changing actions: see `browser::BrowserActuator`.
     pub browser: Option<Arc<dyn BrowserActuator>>,
+    /// Article fetcher for the Reading module. Unlike the clients above,
+    /// this needs no owned credentials, so it is always `Some` in
+    /// production (`None` only appears in tests that want `/api/reading/*`
+    /// to surface NotImplemented).
+    pub reading: Option<Arc<dyn ArticleFetcher>>,
 }
 
 impl AppState {

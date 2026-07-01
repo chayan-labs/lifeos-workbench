@@ -16,6 +16,7 @@ mod metrics;
 mod module_request;
 mod notion;
 mod planned;
+mod reading;
 mod register;
 mod edge;
 mod search;
@@ -103,6 +104,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/browser/scrape", post(browser::scrape))
         .route("/api/browser/act", post(browser::act))
         .route("/api/connections/browser/session", post(browser::session))
+        // --- Reading module: save/parse articles, capture highlights (issue #61) ---
+        .route("/api/reading/save", post(reading::save))
+        .route("/api/reading/highlight", post(reading::highlight))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---

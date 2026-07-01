@@ -14,6 +14,7 @@ pub mod integrations;
 pub mod kite;
 pub mod models;
 pub mod nango;
+pub mod reading;
 pub mod reconcile;
 pub mod routes;
 pub mod state;
@@ -23,6 +24,7 @@ use crate::browser::{BrowserActuator, ProcessBrowserActuator};
 use crate::config::Config;
 use crate::kite::{HttpKiteClient, KiteClient};
 use crate::nango::{HttpNangoClient, NangoClient};
+use crate::reading::{ArticleFetcher, HttpArticleFetcher};
 use crate::state::AppState;
 use crate::whatsapp::{HttpWhatsAppClient, WhatsAppClient};
 use std::sync::Arc;
@@ -60,6 +62,13 @@ fn browser_from_config(config: &Config) -> Option<Arc<dyn BrowserActuator>> {
         .map(|path| Arc::new(ProcessBrowserActuator::new(path.clone(), BROWSER_ACTUATOR_TIMEOUT_SECS)) as Arc<dyn BrowserActuator>)
 }
 
+/// Fetching a public URL needs no owned credentials, so this is always
+/// wired in production - `config` is unused, kept for signature symmetry
+/// with the other `*_from_config` constructors.
+fn reading_from_config(_config: &Config) -> Option<Arc<dyn ArticleFetcher>> {
+    Some(Arc::new(HttpArticleFetcher::new()))
+}
+
 /// Open the DB, detect agents, and assemble shared state from a config.
 /// Wires the real HTTP Nango client, Kite client, WhatsApp (GOWA) client,
 /// and browser actuator whenever their respective config is present; `None`
@@ -70,7 +79,8 @@ pub async fn build_state(config: Config) -> Result<AppState, libsql::Error> {
     let kite = kite_from_config(&config);
     let whatsapp = whatsapp_from_config(&config);
     let browser = browser_from_config(&config);
-    build_state_with_clients(config, nango, kite, whatsapp, browser).await
+    let reading = reading_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
 }
 
 /// Same as `build_state`, but with an explicit Nango client (or `None`) -
@@ -83,7 +93,8 @@ pub async fn build_state_with_nango(
     let kite = kite_from_config(&config);
     let whatsapp = whatsapp_from_config(&config);
     let browser = browser_from_config(&config);
-    build_state_with_clients(config, nango, kite, whatsapp, browser).await
+    let reading = reading_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
 }
 
 /// Same as `build_state`, but with an explicit Kite client (or `None`) - lets
@@ -96,7 +107,8 @@ pub async fn build_state_with_kite(
     let nango = nango_from_config(&config);
     let whatsapp = whatsapp_from_config(&config);
     let browser = browser_from_config(&config);
-    build_state_with_clients(config, nango, kite, whatsapp, browser).await
+    let reading = reading_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
 }
 
 /// Same as `build_state`, but with an explicit WhatsApp client (or `None`) -
@@ -109,7 +121,8 @@ pub async fn build_state_with_whatsapp(
     let nango = nango_from_config(&config);
     let kite = kite_from_config(&config);
     let browser = browser_from_config(&config);
-    build_state_with_clients(config, nango, kite, whatsapp, browser).await
+    let reading = reading_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
 }
 
 /// Same as `build_state`, but with an explicit browser actuator (or `None`)
@@ -122,7 +135,23 @@ pub async fn build_state_with_browser(
     let nango = nango_from_config(&config);
     let kite = kite_from_config(&config);
     let whatsapp = whatsapp_from_config(&config);
-    build_state_with_clients(config, nango, kite, whatsapp, browser).await
+    let reading = reading_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
+}
+
+/// Same as `build_state`, but with an explicit article fetcher (or `None`)
+/// - lets tests inject `reading::mock::MockArticleFetcher` instead of
+/// hitting the real network. Other clients are still wired from `config` if
+/// configured.
+pub async fn build_state_with_reading(
+    config: Config,
+    reading: Option<Arc<dyn ArticleFetcher>>,
+) -> Result<AppState, libsql::Error> {
+    let nango = nango_from_config(&config);
+    let kite = kite_from_config(&config);
+    let whatsapp = whatsapp_from_config(&config);
+    let browser = browser_from_config(&config);
+    build_state_with_clients(config, nango, kite, whatsapp, browser, reading).await
 }
 
 async fn build_state_with_clients(
@@ -131,6 +160,7 @@ async fn build_state_with_clients(
     kite: Option<Arc<dyn KiteClient>>,
     whatsapp: Option<Arc<dyn WhatsAppClient>>,
     browser: Option<Arc<dyn BrowserActuator>>,
+    reading: Option<Arc<dyn ArticleFetcher>>,
 ) -> Result<AppState, libsql::Error> {
     let db = db::connect(&config).await?;
     let agents = agents::detect();
@@ -143,5 +173,6 @@ async fn build_state_with_clients(
         kite,
         whatsapp,
         browser,
+        reading,
     })
 }

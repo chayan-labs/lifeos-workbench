@@ -233,6 +233,24 @@ approve→execute queue for `slack_post` drafts are deferred to later work.
 - **Tools:** `read.save <url>` (fetch+parse via readability; `browser-use` for paywalled), `read.highlight`.
 - **AI:** summarize, extract highlights, link to learning topics; PDFs feed the media pipeline → "find the article where I read about X."
 
+**Implemented (issue #61):** `POST /api/reading/save` (`services/lifeos-api/src/routes/reading.rs`) is free - fetching
+a public URL needs no owned credential, so unlike every prior module there is no Nango connection gate here. It
+fetches the URL via `reading::ArticleFetcher` (real `HttpArticleFetcher`/`reqwest`, or `mock::MockArticleFetcher` in
+tests), extracts title + paragraph text with the `scraper` crate (a lighter, dependency-thin stand-in for the
+vendored Mozilla Readability.js submodule - real Readability-quality extraction and `browser-use` for paywalled
+sites are deferred), computes a naive extractive summary (first two sentences - real AI summarization stays
+available via the existing `POST /api/llm` route, not auto-triggered here to keep `save` fast/deterministic/free to
+test), and idempotently upserts a `source` entity (keyed by domain) plus an `article` entity (keyed by
+`lifeos_vcs::hash_bytes(url)`, reusing the `lifeos-vcs` crate first wired for #58's file versioning). On first save
+only, it naive-keyword-links the article to any existing `learning` topic whose title appears in the article's
+title/excerpt via an `article ─derived_from→ topic` edge (deterministic substring match, not embeddings). `POST
+/api/reading/highlight` is free too - capturing a quote is local and reversible - and 404s if the target article
+doesn't exist. The live SPA's Reading module (`frontend/src/lib/moduleManifests.js::READING_MANIFEST`, routed at
+`/m/reading`) browses articles/highlights/sources through the generic list renderer; unlike other modules there is
+no bulk "sync" button since articles are saved one URL at a time, not polled from an inbox. Deferred: real
+Readability-quality parsing, `read_note`, the `article ─cites→ article` edge, `article.read`, the reader UI itself
+(detail/board views), and AI-generated (non-naive) summaries/highlight-extraction.
+
 ### 3.7 Travel
 - **Entity types:** `trip`, `leg` (flight/train/drive), `booking` (hotel/ticket), `place` (POI).
 - **attrs:** trip → `{name, start, end, destination[], budget, status}`; booking → `{provider, confirmation, cost, file_ref}`.
