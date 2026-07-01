@@ -40,6 +40,16 @@ pub struct Config {
     /// Bearer secret lifeos-api authenticates to Nango's API with. Never sent
     /// to the client, never logged (docs/SECURITY.md §1).
     pub nango_secret_key: Option<String>,
+    /// Kite Connect app credentials (docs/MANUAL-SETUP.md #51). `None` means
+    /// `/api/connections/kite/*` and `/api/broker/positions` return
+    /// NotImplemented rather than pretending Kite is wired up.
+    pub kite_api_key: Option<String>,
+    pub kite_api_secret: Option<String>,
+    /// AES-256-GCM master key (32 raw bytes, base64) for `connections.secret_enc`
+    /// - the envelope used by non-Nango connectors (Kite now, WhatsApp in #52).
+    /// `None` disables those connectors entirely; a secret is never stored
+    /// unencrypted.
+    pub secret_encryption_key: Option<crate::crypto::EncryptionKey>,
 }
 
 impl Config {
@@ -78,6 +88,19 @@ impl Config {
         let nango_server_url = std::env::var("NANGO_SERVER_URL").ok().filter(|s| !s.is_empty());
         let nango_secret_key = std::env::var("NANGO_SECRET_KEY_DEV").ok().filter(|s| !s.is_empty());
 
+        let kite_api_key = std::env::var("KITE_API_KEY").ok().filter(|s| !s.is_empty());
+        let kite_api_secret = std::env::var("KITE_API_SECRET").ok().filter(|s| !s.is_empty());
+        let secret_encryption_key = std::env::var("LIFEOS_SECRET_ENCRYPTION_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| match crate::crypto::parse_key(&s) {
+                Ok(key) => Some(key),
+                Err(e) => {
+                    tracing::error!("LIFEOS_SECRET_ENCRYPTION_KEY is set but invalid: {e} - non-Nango connectors will stay disabled");
+                    None
+                }
+            });
+
         Self {
             db_path,
             turso_url,
@@ -90,6 +113,9 @@ impl Config {
             agent_timeout_secs,
             nango_server_url,
             nango_secret_key,
+            kite_api_key,
+            kite_api_secret,
+            secret_encryption_key,
         }
     }
 }

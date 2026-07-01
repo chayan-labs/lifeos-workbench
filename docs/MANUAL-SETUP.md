@@ -98,3 +98,42 @@ as #52.
 - **Reddit app** (reddit.com/prefs/apps -> create app, type "web app"):
   redirect URI `http://localhost:3003/oauth/callback`, scopes `read` +
   `submit` (submit stays gated).
+
+### #51 - Zerodha Kite Connect app (read-only positions)
+
+Kite doesn't fit Nango's OAuth model (daily request-token, not a refresh
+token), so it's a native custom connector
+(`services/lifeos-api/src/kite.rs`, `/api/connections/kite/*`,
+`/api/broker/positions`). The code is built and tested against a mock -
+trading stays read-only by construction (no place/modify/cancel/GTT route
+exists anywhere on the router; `broker-guard` is the separate hook-layer
+belt-and-suspenders). Bringing up a real connection needs you:
+
+1. **Register a Kite Connect app** at developers.kite.trade -> Create new
+   app. This is a *paid* Zerodha developer subscription (unlike every other
+   integration in this doc) - check current pricing before registering.
+   Redirect URL: point it at wherever the frontend will read the
+   `request_token` query param and POST it to `/api/connections/kite/complete`
+   (a local dev URL is fine to start, e.g. `http://localhost:5173/kite/callback`).
+
+2. **Generate the shared secret-encryption key** (this key also covers #52's
+   WhatsApp connector - generate it once):
+   ```sh
+   openssl rand -base64 32   # -> LIFEOS_SECRET_ENCRYPTION_KEY (back this up outside git - encrypted connections.secret_enc rows become unreadable if it's lost)
+   ```
+
+3. **Set lifeos-api's env**: `KITE_API_KEY`, `KITE_API_SECRET` (from the Kite
+   Connect app), and `LIFEOS_SECRET_ENCRYPTION_KEY` from step 2. Until all
+   three are set, `/api/connections/kite/*` and `/api/broker/positions`
+   return 501.
+
+4. **Daily login** (Kite's access_token expires every day around 6am IST -
+   there is no way around re-logging in daily, by Kite's own design): visit
+   `GET /api/connections/kite/login-url`, open it, log in, and the redirect
+   will carry a `request_token` - POST that to `/api/connections/kite/complete`.
+
+5. **Smoke test**: `GET /api/broker/positions` returns your real positions.
+   Confirm the access token never appears in `lifeos-api`'s logs or in any
+   `/api/connections`/`/api/broker/positions` response body - only
+   `account_handle`/`status`/`provider` should be visible for the connection,
+   and `positions` returns Kite's data with no token field.

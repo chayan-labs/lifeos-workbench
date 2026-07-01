@@ -5,6 +5,7 @@ mod entity;
 mod event;
 mod health;
 mod job;
+mod kite;
 mod llm;
 mod metrics;
 mod module_request;
@@ -53,6 +54,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/connections/session", post(connection::start_session))
         .route("/api/connections/complete", post(connection::complete))
         .route("/api/connections/:id", axum::routing::delete(connection::disconnect))
+        // --- Kite Connect: native custom connector, read-only (issue #51) ---
+        .route("/api/connections/kite/login-url", get(kite::login_url_handler))
+        .route("/api/connections/kite/complete", post(kite::complete))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---
@@ -63,6 +67,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pipeline/run", post(planned::pipeline_run))
         .route("/api/vcs/history", get(planned::not_implemented))
         .route("/api/vcs/commit", post(planned::not_implemented))
-        .route("/api/broker/positions", get(planned::not_implemented))
+        // --- read-only broker positions proxy (issue #51) - no order route exists ---
+        .route("/api/broker/positions", get(kite::positions))
         .with_state(state)
 }

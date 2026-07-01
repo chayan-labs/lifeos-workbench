@@ -43,6 +43,9 @@ async fn test_app(with_nango: bool) -> TestApp {
         agent_timeout_secs: 30,
         nango_server_url: None,
         nango_secret_key: None,
+    kite_api_key: None,
+    kite_api_secret: None,
+    secret_encryption_key: None,
     };
     let nango = Arc::new(MockNangoClient::new());
     let state = build_state_with_nango(config, if with_nango { Some(nango.clone()) } else { None })

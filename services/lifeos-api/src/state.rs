@@ -2,6 +2,7 @@
 
 use crate::agents::DetectedAgent;
 use crate::config::Config;
+use crate::kite::KiteClient;
 use crate::nango::NangoClient;
 use libsql::{Connection, Database};
 use std::sync::Arc;
@@ -20,6 +21,11 @@ pub struct AppState {
     /// secret key is configured - connection routes surface NotImplemented
     /// rather than pretending to work (docs/MANUAL-SETUP.md #47-55).
     pub nango: Option<Arc<dyn NangoClient>>,
+    /// Kite Connect client. `None` until a Kite app + encryption key are
+    /// configured (docs/MANUAL-SETUP.md #51) - `/api/connections/kite/*` and
+    /// `/api/broker/positions` surface NotImplemented rather than pretending.
+    /// Deliberately read-only: see `kite::KiteClient`.
+    pub kite: Option<Arc<dyn KiteClient>>,
 }
 
 impl AppState {
