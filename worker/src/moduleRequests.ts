@@ -8,7 +8,12 @@ import { moduleRequests } from "@lifeos/db";
 import type { WorkerDb } from "@lifeos/db/client/worker";
 import { ulid } from "ulid";
 
-export async function enqueueModuleRequest(db: WorkerDb, workspaceId: string, prompt: string): Promise<string> {
+export async function enqueueModuleRequest(
+  db: WorkerDb,
+  workspaceId: string,
+  prompt: string,
+  chatId?: string,
+): Promise<string> {
   const id = `modreq_${ulid()}`;
   const now = Math.floor(Date.now() / 1000);
   await db.insert(moduleRequests).values({
@@ -16,6 +21,7 @@ export async function enqueueModuleRequest(db: WorkerDb, workspaceId: string, pr
     workspaceId,
     prompt,
     status: "queued",
+    chatId: chatId ?? null,
     createdAt: now,
     updatedAt: now,
   });

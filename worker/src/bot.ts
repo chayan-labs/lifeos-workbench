@@ -106,7 +106,7 @@ export function createBot(deps: BotDeps, botInfo?: UserFromGetMe): Bot {
   // issue #67: heavy/Mac-only work - the bot only ever enqueues, never
   // builds or executes anything itself.
   bot.command("addmodule", async (ctx) => {
-    await ctx.reply(await requestModule(db, workspaceId, ctx.match));
+    await ctx.reply(await requestModule(db, workspaceId, ctx.match, String(ctx.chat.id)));
   });
 
   bot.command("ingest", async (ctx) => {

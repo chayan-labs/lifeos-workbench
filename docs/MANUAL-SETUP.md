@@ -339,6 +339,32 @@ cd server && npx playwright install chromium
 
 Also requires `cargo build --bin lifeos-api` (services/) and `npm install` (frontend/) to
 have been run at least once, since the validator boots both as real child processes.
+
+### #78 - `lifeos-drain` env for the real offline build (`TELEGRAM_BOT_TOKEN`, `LIFEOS_SERVER_DIR`)
+
+`services/lifeos-drain` now actually builds bot-queued `/addmodule` requests
+(`docs/SELF-EXTENSION.md` §1b) and notifies the requester's Telegram chat on completion. Two
+env vars, both read in `services/lifeos-drain/src/main.rs`:
+
+```sh
+# Same value as the Worker's BOT_TOKEN secret (§63/§71 above) - it's the same bot,
+# this is just how the Mac-side drain calls the Telegram API directly instead of
+# routing through Cloudflare. Without this set, builds still complete/fail
+# correctly, they just aren't announced back to the phone.
+export TELEGRAM_BOT_TOKEN="<same token as worker's BOT_TOKEN>"
+
+# Directory scaffold.js lives in, relative to wherever the lifeos-drain binary
+# is launched from (a compiled binary's cwd isn't guaranteed to be the repo
+# root - set this explicitly in the launchd plist). Defaults to "server".
+export LIFEOS_SERVER_DIR="/path/to/life-os/server"
+```
+
+A real build additionally needs everything #72 already required (`ANTHROPIC_API_KEY`, git
+worktree support in the checkout `lifeos-drain` runs against) and #75's `npx playwright
+install chromium` (the render-smoke validator `scaffoldModule` calls). One true end-to-end
+check once all of the above is in place: send `/addmodule <something>` to the real bot, run
+`lifeos-drain` locally, confirm a real commit lands on `main` under `modules/<id>/` and a real
+"✅ live" message arrives in the chat that sent the request.
 `server/scripts/renderSmokeLive.js` is a manual smoke check once all three are done:
 
 ```sh

@@ -149,10 +149,21 @@ export async function scaffoldModule(prompt, workspaceId, opts = {}) {
   }
 }
 
-// Manual local smoke run - not exercised by the test suite (needs a real
-// ANTHROPIC_API_KEY and mutates real git state), see docs/SELF-EXTENSION.md's
-// "Implemented (issue #72)" note.
+// CLI entry point (issue #78): `lifeos-drain` spawns this exact process
+// (`node scaffold.js <prompt> <workspaceId>`) to build a bot-queued module
+// request. The last stdout line is `scaffoldModule`'s return value verbatim,
+// JSON-encoded, so the Rust side has a stable process contract to parse -
+// no separate serialization logic needed on either side. Not exercised by
+// the vitest suite (needs a real ANTHROPIC_API_KEY and mutates real git
+// state), see docs/SELF-EXTENSION.md's "Implemented (issue #72)" note.
 if (process.argv[1] === import.meta.filename) {
-  const result = await scaffoldModule("add a reading list module", "default-personal-workspace");
-  console.log(result);
+  const prompt = process.argv[2];
+  const workspaceId = process.argv[3];
+  if (!prompt || !workspaceId) {
+    console.error("usage: node scaffold.js <prompt> <workspaceId>");
+    process.exit(2);
+  }
+  const result = await scaffoldModule(prompt, workspaceId);
+  console.log(JSON.stringify(result));
+  process.exitCode = result.success ? 0 : 1;
 }

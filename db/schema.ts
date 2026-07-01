@@ -170,6 +170,9 @@ export const moduleRequests = sqliteTable("module_requests", {
   prompt: text("prompt").notNull(),
   status: text("status").notNull().default("queued"),
   error: text("error"),
+  // Telegram chat to notify on install/failure (issue #78, 0004 migration).
+  // NULL for API-originated requests, which have no chat behind them.
+  chatId: text("chat_id"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

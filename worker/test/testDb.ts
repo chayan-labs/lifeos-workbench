@@ -59,6 +59,7 @@ CREATE TABLE module_requests (
   prompt TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued',
   error TEXT,
+  chat_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

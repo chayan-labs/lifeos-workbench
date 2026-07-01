@@ -14,6 +14,10 @@ const MIGRATION_CONTROL: &str = include_str!("../../../migrations/0002_control_p
 /// Applied to the attached derived schema `d` (FTS5 lexical index). Separate
 /// from core/control because the derived DB is never synced and is rebuildable.
 const MIGRATION_DERIVED: &str = include_str!("../../../migrations/0003_derived.sql");
+/// `ALTER TABLE ADD COLUMN` isn't naturally idempotent like the `CREATE TABLE
+/// IF NOT EXISTS` migrations above - `add_column_if_missing` below guards it.
+const MIGRATION_MODULE_REQUESTS_CHAT_ID: &str =
+    include_str!("../../../migrations/0004_module_requests_chat_id.sql");
 
 /// The canonical DB plus its live connection. `database` is retained by the caller
 /// so the embedded-replica's background replicator stays alive (dropping it would
@@ -136,7 +140,33 @@ pub async fn index_entity(conn: &Connection, id: &str) -> Result<(), libsql::Err
 pub async fn run_migrations(conn: &Connection) -> Result<(), libsql::Error> {
     conn.execute_batch(MIGRATION_CORE).await?;
     conn.execute_batch(MIGRATION_CONTROL).await?;
+    add_column_if_missing(conn, "module_requests", "chat_id", MIGRATION_MODULE_REQUESTS_CHAT_ID).await?;
     tracing::info!("migrations applied (core + control plane)");
+    Ok(())
+}
+
+/// Runs an `ALTER TABLE ADD COLUMN` migration only if the column isn't
+/// already there, so `run_migrations` stays safe to call on every boot (a
+/// second `ADD COLUMN` on the same column is a hard SQLite error, unlike the
+/// `CREATE TABLE IF NOT EXISTS` migrations above).
+async fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> Result<(), libsql::Error> {
+    let mut rows = conn.query(&format!("PRAGMA table_info({table})"), ()).await?;
+    let mut exists = false;
+    while let Some(row) = rows.next().await? {
+        let name: String = row.get(1)?;
+        if name == column {
+            exists = true;
+            break;
+        }
+    }
+    if !exists {
+        conn.execute_batch(ddl).await?;
+    }
     Ok(())
 }
 

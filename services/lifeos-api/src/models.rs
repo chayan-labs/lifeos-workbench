@@ -218,7 +218,7 @@ pub fn read_connection(row: &Row) -> Result<Connection, ApiError> {
 // ----------------------------------------------------------- module_requests
 
 pub const COLS_MODULE_REQUEST: &str =
-    "id, workspace_id, prompt, status, error, created_at, updated_at";
+    "id, workspace_id, prompt, status, error, created_at, updated_at, chat_id";
 
 #[derive(Serialize)]
 pub struct ModuleRequest {
@@ -230,6 +230,9 @@ pub struct ModuleRequest {
     pub error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Telegram chat to notify on install/failure (issue #78). `None` for
+    /// API-originated requests, which have no chat behind them.
+    pub chat_id: Option<String>,
 }
 
 pub fn read_module_request(row: &Row) -> Result<ModuleRequest, ApiError> {
@@ -241,5 +244,6 @@ pub fn read_module_request(row: &Row) -> Result<ModuleRequest, ApiError> {
         error: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        chat_id: row.get(7)?,
     })
 }

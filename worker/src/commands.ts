@@ -136,12 +136,19 @@ export function formatApprovalResult(result: ApprovalResult): string {
 // `/addmodule <prompt>` (issue #67, README.md's "Mac offline (queued)"
 // flow): writes a `module_requests` row and replies "queued" - never writes
 // code or files itself (there's no filesystem on a Cloudflare Worker to
-// write to; the real scaffold.js build only ever runs on the Mac).
-export async function requestModule(db: WorkerDb, workspaceId: string, text: string): Promise<string> {
+// write to; the real scaffold.js build only ever runs on the Mac). `chatId`
+// (issue #78) is carried through so `lifeos-drain` can notify this same chat
+// once the Mac actually builds it.
+export async function requestModule(
+  db: WorkerDb,
+  workspaceId: string,
+  text: string,
+  chatId?: string,
+): Promise<string> {
   const prompt = text.trim();
   if (!prompt) return "Usage: /addmodule <what you want added>";
 
-  await enqueueModuleRequest(db, workspaceId, prompt);
+  await enqueueModuleRequest(db, workspaceId, prompt, chatId);
   return "Queued. The Mac will build it next time it's awake.";
 }
 

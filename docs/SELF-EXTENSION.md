@@ -42,6 +42,45 @@ unit tests (happy path through both events, the failed path with the error surfa
 no-op-outside-expected-state cases) plus 2 new `services/lifeos-api` integration tests for the
 GET route (`200` right after `POST`, `404` for an unknown id).
 
+**Implemented (issue #78):** the real offline path - a bot-queued `/addmodule` request now
+actually builds and notifies. Two intake paths converge on `module_requests`, but only one
+reached the drain before this issue: `POST /api/module-request` links a `jobs` row of kind
+`module_build`, while `worker/src/moduleRequests.ts::enqueueModuleRequest` (the Telegram
+`/addmodule` path this issue is about) inserts only the `module_requests` row - no `jobs` row
+for `claim_job` to ever see. So `lifeos-drain` claims directly off `module_requests`:
+`claim_next_module_request` (new, `services/lifeos-drain/src/lib.rs`) is the same atomic
+`UPDATE ... WHERE id = (SELECT ...)` shape as `claim_job`, transitioning the oldest queued row
+straight to `building`. `run_module_build` then calls a `ModuleBuilder` (real impl
+`ScaffoldJsBuilder` spawns `node scaffold.js <prompt> <workspaceId>` - #78 also gave
+`scaffold.js` a real CLI entry point whose last stdout line is `scaffoldModule`'s JSON return
+value verbatim), applies `complete_module_request`/`fail_module_request` on the result, and -
+if the row carries a `chat_id` - calls a `Notifier` (`TelegramNotifier`, a direct
+`api.telegram.org/bot<token>/sendMessage` call; no Cloudflare Worker round-trip, since the Mac
+is offline-first by design). Both `ModuleBuilder` and `Notifier` are `async-trait` traits with
+mock implementations in tests, mirroring the exact DI convention `lifeos-api` already uses for
+every external call (`NangoClient`, `WhatsAppClient`).
+
+`module_requests.chat_id` (new `migrations/0004_module_requests_chat_id.sql`, nullable) carries
+the Telegram chat to notify back - threaded through from `ctx.chat.id` at the `/addmodule`
+call site (`worker/src/bot.ts`) down through `requestModule`/`enqueueModuleRequest`. API-
+originated requests have no chat and are simply never notified (`chat_id IS NULL`). Since
+`ALTER TABLE ADD COLUMN` isn't idempotent like this project's other `CREATE TABLE IF NOT
+EXISTS` migrations, `lifeos-api/src/db.rs::add_column_if_missing` guards it with a
+`PRAGMA table_info` check before applying, so `run_migrations` stays safe to call on every boot.
+
+The drain's `module_requests` poll runs sequentially with its `jobs` poll (single-worker
+simplicity, same as the rest of this crate) - a long-running build pauses job draining until it
+finishes. Accepted tradeoff, not a bug; a future issue can split it into a second poll loop if
+this becomes a real problem in practice.
+
+**Not run live in this session** - same reasoning as #72: a real build needs a real
+`ANTHROPIC_API_KEY`, costs real tokens, and mutates real git state; here it additionally sends
+a real Telegram message to a real chat. All tested with mocks (`services/lifeos-drain`'s
+`claim_next_module_request`/`run_module_build` unit tests, plus a `worker` test asserting
+`chat_id` round-trips through `enqueueModuleRequest`). `docs/MANUAL-SETUP.md` §78 documents the
+one true end-to-end check: queue a request via `/addmodule` on the real bot, run `lifeos-drain`
+locally with `TELEGRAM_BOT_TOKEN` set, confirm a real commit lands and a real message arrives.
+
 ---
 
 ## 2. Tool restriction - defense in depth (3 layers)
