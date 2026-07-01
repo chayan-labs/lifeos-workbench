@@ -98,6 +98,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/vcs/commit", post(vcs::commit))
         .route("/api/vcs/history", get(vcs::history))
         .route("/api/vcs/checkout", get(vcs::checkout))
+        // --- TimeTravel frontend surface (issue #87): per-type diff + read/
+        //     forward-only branch/tag/snapshot ---
+        .route("/api/vcs/diff", get(vcs::diff))
+        .route("/api/vcs/refs", get(vcs::list_refs))
+        .route("/api/vcs/branch", post(vcs::create_branch))
+        .route("/api/vcs/tag", post(vcs::create_tag))
+        .route("/api/vcs/snapshot", get(vcs::read_snapshot))
         .route("/api/notion/list", get(notion::list))
         .route("/api/notion/create", post(notion::create))
         // --- Notion module: two-way sync in/back (issue #59) ---

@@ -70,7 +70,9 @@ Each row is one work item: the route, where it lands in the UI, and what to repl
 | `POST /api/pipeline/run` | `Dashboard.jsx` pipeline trigger - replace the `setTimeout` animation with a real enqueue + run-status from `events` |
 
 **Planned routes (honest 501) - keep declared, show a "ships in phase N" state, do not fake success:**
-`GET /api/vcs/history`, `POST /api/vcs/commit` (wire `TimeTravel.jsx` to them when the VCS phase lands), `GET /api/broker/positions` (read-only; **no order route will ever exist**).
+`GET /api/broker/positions` (read-only; **no order route will ever exist**).
+
+**Live (issue #86/#87):** `TimeTravel.jsx` (`Storage.jsx` → Versions tab) is wired to the real `lifeos-vcs` HTTP surface - `GET/POST /api/vcs/{history,commit,checkout,diff}` for per-file version timelines + real per-type diffs, `GET/POST /api/vcs/{refs,branch,tag,snapshot}` for read/forward-only branch/tag creation and snapshot inspection. `lib/vcsApi.js` is the thin wrapper. The pre-existing localStorage app-settings checkpoint UI in the same component is a separate, unrelated concern (browser-only preferences, not file content).
 
 ---
 

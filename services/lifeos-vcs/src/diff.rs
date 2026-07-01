@@ -17,6 +17,7 @@
 
 use std::fmt;
 
+use serde::Serialize;
 use similar::{ChangeTag, TextDiff};
 
 use crate::blob::read_blob;
@@ -68,20 +69,21 @@ fn blocking_issue_for(entity_type: &str) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LineTag {
     Equal,
     Insert,
     Delete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiffLine {
     pub tag: LineTag,
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TextDiffResult {
     pub lines: Vec<DiffLine>,
     pub inserted: usize,

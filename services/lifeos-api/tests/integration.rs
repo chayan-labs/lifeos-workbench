@@ -398,6 +398,130 @@ async fn vcs_routes_version_a_file_end_to_end() {
     assert_eq!(&bytes[..], b"hello vcs");
 }
 
+/// `/api/vcs/diff` (issue #87): real text diff between two committed
+/// versions of the same file.
+#[tokio::test]
+async fn vcs_diff_computes_a_real_diff_between_two_text_versions() {
+    let app = test_app().await;
+    use base64::Engine as _;
+    let encode = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+
+    let (_, first) = send(
+        &app.router,
+        "POST",
+        "/api/vcs/commit",
+        Some(json!({"name": "notes.txt", "content_base64": encode("line one\n"), "message": "first"})),
+    )
+    .await;
+    let entity_id = first["id"].as_str().unwrap().to_string();
+    let old_ref = first["blob_ref"].as_str().unwrap().to_string();
+
+    let (st, second) = send(
+        &app.router,
+        "POST",
+        "/api/vcs/commit",
+        Some(json!({"entity_id": entity_id, "name": "notes.txt", "content_base64": encode("line one\nline two\n"), "message": "second"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let new_ref = second["blob_ref"].as_str().unwrap().to_string();
+
+    let (st, diff_body) = send(
+        &app.router,
+        "GET",
+        &format!("/api/vcs/diff?entity_id={entity_id}&old={old_ref}&new={new_ref}"),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(diff_body["supported"], true);
+    assert_eq!(diff_body["inserted"], 1);
+    assert_eq!(diff_body["deleted"], 0);
+    assert_eq!(diff_body["summary"], "1 line added");
+}
+
+/// A binary-ish extension gets an honest `supported: false` + the specific
+/// blocking issue rather than a silent no-op or a fake diff (issue #85/#87).
+#[tokio::test]
+async fn vcs_diff_names_the_blocking_issue_for_unsupported_types() {
+    let app = test_app().await;
+    use base64::Engine as _;
+    let encode = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+
+    let (_, first) = send(
+        &app.router,
+        "POST",
+        "/api/vcs/commit",
+        Some(json!({"name": "cover.png", "content_base64": encode("fake image bytes a"), "message": "first"})),
+    )
+    .await;
+    let entity_id = first["id"].as_str().unwrap().to_string();
+    let old_ref = first["blob_ref"].as_str().unwrap().to_string();
+
+    let (_, second) = send(
+        &app.router,
+        "POST",
+        "/api/vcs/commit",
+        Some(json!({"entity_id": entity_id, "name": "cover.png", "content_base64": encode("fake image bytes b"), "message": "second"})),
+    )
+    .await;
+    let new_ref = second["blob_ref"].as_str().unwrap().to_string();
+
+    let (st, diff_body) = send(
+        &app.router,
+        "GET",
+        &format!("/api/vcs/diff?entity_id={entity_id}&old={old_ref}&new={new_ref}"),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(diff_body["supported"], false);
+    assert_eq!(diff_body["kind"], "image");
+    assert!(diff_body["blocked_by"].as_str().unwrap().contains("#90"));
+}
+
+/// `/api/vcs/branch`, `/api/vcs/tag`, `/api/vcs/refs`, `/api/vcs/snapshot`
+/// (issue #87): forward-only ref creation + read-back, no branch-force route
+/// exists anywhere (docs/AGENT-CONTROL.md §1).
+#[tokio::test]
+async fn vcs_branch_and_tag_snapshot_current_state_and_are_listable() {
+    let app = test_app().await;
+    use base64::Engine as _;
+    let (_, commit_body) = send(
+        &app.router,
+        "POST",
+        "/api/vcs/commit",
+        Some(json!({"name": "notes.txt", "content_base64": base64::engine::general_purpose::STANDARD.encode("v1"), "message": "first"})),
+    )
+    .await;
+    let entity_id = commit_body["id"].as_str().unwrap().to_string();
+    let blob_ref = commit_body["blob_ref"].as_str().unwrap().to_string();
+
+    let (st, branch_body) = send(&app.router, "POST", "/api/vcs/branch", Some(json!({"name": "main"}))).await;
+    assert_eq!(st, StatusCode::OK);
+    let snapshot_ref = branch_body["snapshot_ref"].as_str().unwrap().to_string();
+
+    let (st, tag_body) = send(&app.router, "POST", "/api/vcs/tag", Some(json!({"name": "v1"}))).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(tag_body["name"], "v1");
+
+    // Setting the same tag again to the identical current state is a no-op, not an error.
+    let (st, _) = send(&app.router, "POST", "/api/vcs/tag", Some(json!({"name": "v1"}))).await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, branches) = send(&app.router, "GET", "/api/vcs/refs?kind=branch", None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(branches[0]["name"], "main");
+
+    let (st, tags) = send(&app.router, "GET", "/api/vcs/refs?kind=tag", None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(tags[0]["name"], "v1");
+
+    let (st, manifest) = send(&app.router, "GET", &format!("/api/vcs/snapshot?snapshot_ref={snapshot_ref}"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(manifest["entries"][entity_id.as_str()], blob_ref);
+}
+
 #[tokio::test]
 async fn unknown_workspace_is_rejected() {
     let app = test_app().await;

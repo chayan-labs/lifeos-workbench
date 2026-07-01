@@ -41,3 +41,7 @@ build/
 target/
 *.derived
 test_*.db
+
+# lifeos-vcs CAS blob storage (local dev runs)
+/services/lifeos-blobs/
+*.blobs/

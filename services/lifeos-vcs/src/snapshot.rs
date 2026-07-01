@@ -152,6 +152,36 @@ pub async fn get_ref(
     }
 }
 
+/// A single branch/tag pointer, as returned to a listing caller (issue #87's
+/// read-only branch/tag UI - forward-only, matches docs/AGENT-CONTROL.md §1).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefEntry {
+    pub name: String,
+    pub snapshot_ref: String,
+    pub updated_at: i64,
+}
+
+/// Lists every branch or tag in a workspace, newest first.
+pub async fn list_refs(conn: &Connection, workspace_id: &str, kind: &str) -> Result<Vec<RefEntry>, SnapshotError> {
+    let mut rows = conn
+        .query(
+            "SELECT name, snapshot_ref, updated_at FROM vcs_refs \
+             WHERE workspace_id=?1 AND kind=?2 ORDER BY updated_at DESC",
+            params![workspace_id, kind],
+        )
+        .await
+        .map_err(SnapshotError::Db)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(SnapshotError::Db)? {
+        out.push(RefEntry {
+            name: row.get(0).map_err(SnapshotError::Db)?,
+            snapshot_ref: row.get(1).map_err(SnapshotError::Db)?,
+            updated_at: row.get(2).map_err(SnapshotError::Db)?,
+        });
+    }
+    Ok(out)
+}
+
 /// All `snapshot_ref`s currently pointed at by any branch or tag, across
 /// every workspace. Used by `gc::mark_and_sweep` to compute the live set.
 pub async fn all_ref_snapshots(conn: &Connection) -> Result<Vec<String>, SnapshotError> {
@@ -263,6 +293,24 @@ mod tests {
         let result = set_tag(&conn, "ws_1", "v1", "snap_1", 200).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn list_refs_returns_only_the_requested_kind_newest_first() {
+        let conn = fresh_conn("test_list_refs.db").await;
+
+        set_branch(&conn, "ws_1", "main", "snap_1", 100).await.unwrap();
+        set_branch(&conn, "ws_1", "experiment", "snap_2", 200).await.unwrap();
+        set_tag(&conn, "ws_1", "v1", "snap_3", 150).await.unwrap();
+
+        let branches = list_refs(&conn, "ws_1", "branch").await.unwrap();
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[0].name, "experiment");
+        assert_eq!(branches[1].name, "main");
+
+        let tags = list_refs(&conn, "ws_1", "tag").await.unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "v1");
     }
 
     #[tokio::test]

@@ -8,6 +8,13 @@
 //!
 //! No update/delete/rewrite route exists here, matching docs/AGENT-CONTROL.md
 //! §1: VCS internals only ever grow forward through these routes.
+//!
+//! Issue #87 adds the routes the TimeTravel frontend needs beyond commit/
+//! history/checkout: `diff` (dispatches to lifeos-vcs's per-type diff, #85 -
+//! real for text-backed types, an honest `supported: false` + blocking issue
+//! for the rest), and read/forward-only `refs`/`branch`/`tag`/`snapshot` -
+//! branches move, tags refuse to move, and there is still no way to force a
+//! branch backward or delete a ref through this surface.
 
 use crate::auth::resolve_workspace;
 use crate::db::index_entity;
@@ -149,6 +156,183 @@ pub async fn history(
         .await
         .map_err(|e| ApiError::Internal(format!("history query failed: {e}")))?;
     Ok(Json(entries))
+}
+
+#[derive(Deserialize)]
+pub struct DiffQuery {
+    entity_id: String,
+    old: String,
+    /// Compares against the entity's current version when omitted.
+    new: Option<String>,
+}
+
+/// Maps a committed file's name to the coarse `entity_type` `strategy_for`
+/// (lifeos-vcs, issue #85) dispatches on. Only extensions with a real,
+/// working diff pipeline map to a named type - everything else maps to
+/// "binary" so `diff_blobs` names the specific blocking issue rather than
+/// this route silently guessing.
+fn diff_kind_for(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".tscn") {
+        "godot_tscn"
+    } else if lower.ends_with(".tres") {
+        "godot_tres"
+    } else if lower.ends_with(".md") || lower.ends_with(".markdown") {
+        "markdown"
+    } else if lower.ends_with(".rs")
+        || lower.ends_with(".js")
+        || lower.ends_with(".jsx")
+        || lower.ends_with(".ts")
+        || lower.ends_with(".tsx")
+        || lower.ends_with(".py")
+        || lower.ends_with(".json")
+        || lower.ends_with(".toml")
+        || lower.ends_with(".css")
+    {
+        "code"
+    } else if lower.ends_with(".txt") {
+        "text"
+    } else if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".gif") {
+        "image"
+    } else if lower.ends_with(".mp4") || lower.ends_with(".mov") {
+        "video"
+    } else if lower.ends_with(".mp3") || lower.ends_with(".wav") {
+        "audio"
+    } else if lower.ends_with(".pdf") {
+        "pdf"
+    } else if lower.ends_with(".docx") {
+        "docx"
+    } else {
+        "binary"
+    }
+}
+
+/// A real diff for text-backed types; an honest `supported: false` +
+/// blocking issue for everything else - never a silent no-op or fake diff
+/// (docs/VERSIONING.md §3, issue #85).
+pub async fn diff(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<DiffQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let workspace_id = resolve_workspace(&headers, &state.config.jwt_secret, None);
+    let entity = fetch_one(&state, &workspace_id, &q.entity_id).await?.0;
+    let title = entity.title.as_deref().unwrap_or("");
+    let name = entity.attrs.get("name").and_then(|v| v.as_str()).unwrap_or(title);
+    let kind = diff_kind_for(name);
+
+    let new_ref = match q.new {
+        Some(r) => r,
+        None => existing_blob_ref(&state, &workspace_id, &q.entity_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("entity '{}' has no committed version", q.entity_id)))?,
+    };
+
+    match lifeos_vcs::diff_blobs(&state.vcs_store, &q.old, &new_ref, kind) {
+        Ok(result) => Ok(Json(json!({
+            "supported": true,
+            "kind": kind,
+            "summary": result.summary(),
+            "inserted": result.inserted,
+            "deleted": result.deleted,
+            "lines": result.lines,
+        }))),
+        Err(lifeos_vcs::DiffError::UnsupportedKind { kind, blocked_by }) => {
+            Ok(Json(json!({ "supported": false, "kind": kind, "blocked_by": blocked_by })))
+        }
+        Err(e) => Err(ApiError::Internal(format!("diff failed: {e}"))),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RefsQuery {
+    kind: String,
+}
+
+/// Read-only branch/tag listing (docs/AGENT-CONTROL.md §1: VCS internals only
+/// ever grow forward - no branch-force/rewrite route exists anywhere).
+pub async fn list_refs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RefsQuery>,
+) -> ApiResult<Json<Vec<lifeos_vcs::RefEntry>>> {
+    if q.kind != "branch" && q.kind != "tag" {
+        return Err(ApiError::BadRequest("kind must be 'branch' or 'tag'".into()));
+    }
+    let workspace_id = resolve_workspace(&headers, &state.config.jwt_secret, None);
+    let refs = lifeos_vcs::list_refs(&state.conn, &workspace_id, &q.kind)
+        .await
+        .map_err(|e| ApiError::Internal(format!("list_refs failed: {e}")))?;
+    Ok(Json(refs))
+}
+
+#[derive(Deserialize)]
+pub struct CreateRefBody {
+    name: String,
+    workspace_id: Option<String>,
+}
+
+/// Snapshots the workspace's current state and points a moving branch at it.
+pub async fn create_branch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateRefBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if req.name.trim().is_empty() {
+        return Err(ApiError::BadRequest("name is required".into()));
+    }
+    let workspace_id = resolve_workspace(&headers, &state.config.jwt_secret, req.workspace_id.as_deref());
+    let snapshot_ref = lifeos_vcs::create_snapshot(&state.conn, &state.vcs_store, &workspace_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("create_snapshot failed: {e}")))?;
+    let now = now_secs();
+    lifeos_vcs::set_branch(&state.conn, &workspace_id, &req.name, &snapshot_ref, now)
+        .await
+        .map_err(|e| ApiError::Internal(format!("set_branch failed: {e}")))?;
+    Ok(Json(json!({ "name": req.name, "snapshot_ref": snapshot_ref, "updated_at": now })))
+}
+
+/// Snapshots the workspace's current state and points a fixed tag at it.
+/// Refuses (400) if the tag name already points at a different snapshot -
+/// tags never move (docs/VERSIONING.md §2.4).
+pub async fn create_tag(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateRefBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if req.name.trim().is_empty() {
+        return Err(ApiError::BadRequest("name is required".into()));
+    }
+    let workspace_id = resolve_workspace(&headers, &state.config.jwt_secret, req.workspace_id.as_deref());
+    let snapshot_ref = lifeos_vcs::create_snapshot(&state.conn, &state.vcs_store, &workspace_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("create_snapshot failed: {e}")))?;
+    let now = now_secs();
+    lifeos_vcs::set_tag(&state.conn, &workspace_id, &req.name, &snapshot_ref, now)
+        .await
+        .map_err(|e| match e {
+            lifeos_vcs::SnapshotError::TagImmutable { name } => {
+                ApiError::BadRequest(format!("tag '{name}' already points elsewhere and cannot be moved"))
+            }
+            other => ApiError::Internal(format!("set_tag failed: {other}")),
+        })?;
+    Ok(Json(json!({ "name": req.name, "snapshot_ref": snapshot_ref, "updated_at": now })))
+}
+
+#[derive(Deserialize)]
+pub struct SnapshotQuery {
+    snapshot_ref: String,
+}
+
+/// Reads a snapshot's `{entity_id -> blob_ref}` manifest - "show me
+/// everything as it was 3 weeks ago" (docs/VERSIONING.md §2.4).
+pub async fn read_snapshot(
+    State(state): State<AppState>,
+    Query(q): Query<SnapshotQuery>,
+) -> ApiResult<Json<lifeos_vcs::SnapshotManifest>> {
+    let manifest = lifeos_vcs::read_snapshot(&state.vcs_store, &q.snapshot_ref)
+        .map_err(|e| ApiError::NotFound(format!("snapshot '{}' not found: {e}", q.snapshot_ref)))?;
+    Ok(Json(manifest))
 }
 
 async fn existing_blob_ref(state: &AppState, workspace_id: &str, id: &str) -> ApiResult<Option<String>> {
