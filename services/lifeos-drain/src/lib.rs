@@ -4,8 +4,50 @@
 //! drainers never run the same job; crashed claims must be reaped and retried.
 //! These functions are split out of `main` so the concurrency and reaper
 //! guarantees can be tested directly against a libSQL connection.
+//!
+//! `module_requests` (issue #76, docs/SELF-EXTENSION.md §1) gets its own
+//! queued->building->installed|failed transitions below, guarded by the same
+//! CAS-via-WHERE-clause discipline as `complete_job`/`fail_job`. This crate
+//! has no dependency on `lifeos-api` (it's a standalone binary against the
+//! same DB file), so `emit_event` is a small self-contained mirror of
+//! `lifeos_api::audit::emit` rather than a cross-crate import.
 
 use libsql::{params, Connection};
+use ulid::{Generator, Ulid};
+use std::sync::Mutex;
+
+static EVENT_ID_GENERATOR: Mutex<Generator> = Mutex::new(Generator::new());
+
+fn new_event_id() -> String {
+    let ulid = EVENT_ID_GENERATOR
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .generate()
+        .unwrap_or_else(|_| Ulid::new());
+    format!("evt_{ulid}")
+}
+
+/// Append one `events` row. Mirrors `lifeos_api::audit::emit`'s shape exactly
+/// (same table, same id scheme) so events this crate writes are
+/// indistinguishable from ones the API writes.
+async fn emit_event(
+    conn: &Connection,
+    workspace_id: &str,
+    event_type: &str,
+    entity_id: &str,
+    actor: &str,
+    attrs: &serde_json::Value,
+    now: i64,
+) -> libsql::Result<()> {
+    let attrs_str = serde_json::to_string(attrs).unwrap_or_else(|_| "{}".into());
+    conn.execute(
+        "INSERT INTO events (id, workspace_id, ts, type, entity_id, actor, attrs) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![new_event_id(), workspace_id, now, event_type, entity_id, actor, attrs_str],
+    )
+    .await?;
+    Ok(())
+}
 
 /// A job a drainer has exclusively claimed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,5 +184,239 @@ pub fn dispatch(kind: &str) -> Dispatch {
         "eval" => Dispatch::Stub("harness eval"),
         "reconcile" => Dispatch::Stub("lifeos-api reconcile"),
         _ => Dispatch::Unknown,
+    }
+}
+
+// ----------------------------------------------------- module_requests (#76)
+//
+// A `module_build` job's payload carries `request_id` - the linked
+// `module_requests` row a requester polls via `GET /api/module-request/:id`.
+// These three functions are the queued->building->installed|failed state
+// machine, each guarded by the current status exactly like `complete_job`/
+// `fail_job`'s lease guard (a mismatched WHERE = 0 rows = someone else
+// already moved this request, don't clobber it) and each emitting the
+// matching `module.*` event only when the transition actually applied.
+//
+// Deliberately NOT called from `run_job`/`dispatch` yet: `module_build` is
+// still a `Dispatch::Stub` (no real `scaffold.js` invocation - that's #78's
+// job), and marking a request `installed` for a build that never actually
+// ran would be exactly the kind of false-confidence result this project's
+// validators (#74/#75) were built to avoid. #78's real drain loop calls
+// these in lockstep with `claim_job`/`complete_job`/`fail_job` once it
+// actually invokes `scaffoldModule()`.
+
+/// `queued` -> `building`. Call right after `claim_job` claims the linked
+/// `module_build` job. Returns rows affected (0 = already transitioned).
+pub async fn claim_module_request(
+    conn: &Connection,
+    request_id: &str,
+    workspace_id: &str,
+    now: i64,
+) -> libsql::Result<u64> {
+    let n = conn
+        .execute(
+            "UPDATE module_requests SET status='building', updated_at=?2 WHERE id=?1 AND status='queued'",
+            params![request_id, now],
+        )
+        .await?;
+    if n > 0 {
+        emit_event(conn, workspace_id, "module.building", request_id, "mac-drain", &serde_json::json!({}), now).await?;
+    }
+    Ok(n)
+}
+
+/// `building` -> `installed`. Call once the real build (§1 step 5) lands the
+/// module. Returns rows affected (0 = lease lost / already transitioned).
+pub async fn complete_module_request(
+    conn: &Connection,
+    request_id: &str,
+    workspace_id: &str,
+    module_id: &str,
+    now: i64,
+) -> libsql::Result<u64> {
+    let n = conn
+        .execute(
+            "UPDATE module_requests SET status='installed', updated_at=?2 WHERE id=?1 AND status='building'",
+            params![request_id, now],
+        )
+        .await?;
+    if n > 0 {
+        emit_event(
+            conn,
+            workspace_id,
+            "module.installed",
+            request_id,
+            "mac-drain",
+            &serde_json::json!({ "id": module_id }),
+            now,
+        )
+        .await?;
+    }
+    Ok(n)
+}
+
+/// `building` -> `failed`, with the honest error message a requester's
+/// `GET /api/module-request/:id` surfaces directly (issue #76's acceptance:
+/// "failure surfaces honestly to the requester", not a generic "something
+/// went wrong"). Returns rows affected (0 = lease lost / already transitioned).
+pub async fn fail_module_request(
+    conn: &Connection,
+    request_id: &str,
+    workspace_id: &str,
+    error: &str,
+    now: i64,
+) -> libsql::Result<u64> {
+    let n = conn
+        .execute(
+            "UPDATE module_requests SET status='failed', error=?2, updated_at=?3 WHERE id=?1 AND status='building'",
+            params![request_id, error, now],
+        )
+        .await?;
+    if n > 0 {
+        emit_event(
+            conn,
+            workspace_id,
+            "module.failed",
+            request_id,
+            "mac-drain",
+            &serde_json::json!({ "error": error }),
+            now,
+        )
+        .await?;
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libsql::Builder;
+
+    async fn fresh_conn(path: &str) -> Connection {
+        let _ = std::fs::remove_file(path);
+        let db = Builder::new_local(path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "CREATE TABLE module_requests (\
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, prompt TEXT NOT NULL, \
+                status TEXT NOT NULL DEFAULT 'queued', error TEXT, \
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE events (\
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, ts INTEGER NOT NULL, \
+                type TEXT NOT NULL, entity_id TEXT, actor TEXT NOT NULL, attrs TEXT NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    async fn insert_queued(conn: &Connection, id: &str, workspace_id: &str, now: i64) {
+        conn.execute(
+            "INSERT INTO module_requests (id, workspace_id, prompt, status, error, created_at, updated_at) \
+             VALUES (?1, ?2, 'add a widget module', 'queued', NULL, ?3, ?3)",
+            params![id, workspace_id, now],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn status_of(conn: &Connection, id: &str) -> String {
+        let mut rows = conn
+            .query("SELECT status FROM module_requests WHERE id=?1", params![id])
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    async fn event_count(conn: &Connection, event_type: &str) -> i64 {
+        let mut rows = conn
+            .query("SELECT COUNT(*) FROM events WHERE type=?1", params![event_type])
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn walks_queued_building_installed_with_an_event_at_each_step() {
+        let conn = fresh_conn("test_mr_happy.db").await;
+        insert_queued(&conn, "req_1", "ws1", 100).await;
+
+        assert_eq!(claim_module_request(&conn, "req_1", "ws1", 101).await.unwrap(), 1);
+        assert_eq!(status_of(&conn, "req_1").await, "building");
+        assert_eq!(event_count(&conn, "module.building").await, 1);
+
+        assert_eq!(
+            complete_module_request(&conn, "req_1", "ws1", "widgets", 102).await.unwrap(),
+            1
+        );
+        assert_eq!(status_of(&conn, "req_1").await, "installed");
+        assert_eq!(event_count(&conn, "module.installed").await, 1);
+
+        let _ = std::fs::remove_file("test_mr_happy.db");
+    }
+
+    #[tokio::test]
+    async fn walks_queued_building_failed_with_the_error_surfaced() {
+        let conn = fresh_conn("test_mr_failed.db").await;
+        insert_queued(&conn, "req_2", "ws1", 100).await;
+
+        claim_module_request(&conn, "req_2", "ws1", 101).await.unwrap();
+        assert_eq!(
+            fail_module_request(&conn, "req_2", "ws1", "PreToolUse hook denied", 103)
+                .await
+                .unwrap(),
+            1
+        );
+
+        assert_eq!(status_of(&conn, "req_2").await, "failed");
+        let mut rows = conn
+            .query("SELECT error FROM module_requests WHERE id='req_2'", ())
+            .await
+            .unwrap();
+        let error: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(error, "PreToolUse hook denied");
+        assert_eq!(event_count(&conn, "module.failed").await, 1);
+
+        let _ = std::fs::remove_file("test_mr_failed.db");
+    }
+
+    #[tokio::test]
+    async fn claim_is_a_noop_on_a_request_that_is_not_queued() {
+        let conn = fresh_conn("test_mr_claim_noop.db").await;
+        insert_queued(&conn, "req_3", "ws1", 100).await;
+        claim_module_request(&conn, "req_3", "ws1", 101).await.unwrap();
+
+        // Second claim attempt on an already-building request is a no-op,
+        // not a re-transition or a duplicate event - same discipline as a
+        // job whose lease was already taken.
+        assert_eq!(claim_module_request(&conn, "req_3", "ws1", 102).await.unwrap(), 0);
+        assert_eq!(event_count(&conn, "module.building").await, 1);
+
+        let _ = std::fs::remove_file("test_mr_claim_noop.db");
+    }
+
+    #[tokio::test]
+    async fn complete_and_fail_are_noops_outside_the_building_state() {
+        let conn = fresh_conn("test_mr_wrong_state.db").await;
+        insert_queued(&conn, "req_4", "ws1", 100).await;
+
+        // Still 'queued' - neither transition should apply, and neither
+        // should emit an event for a state change that didn't happen.
+        assert_eq!(
+            complete_module_request(&conn, "req_4", "ws1", "widgets", 101).await.unwrap(),
+            0
+        );
+        assert_eq!(fail_module_request(&conn, "req_4", "ws1", "boom", 101).await.unwrap(), 0);
+        assert_eq!(status_of(&conn, "req_4").await, "queued");
+        assert_eq!(event_count(&conn, "module.installed").await, 0);
+        assert_eq!(event_count(&conn, "module.failed").await, 0);
+
+        let _ = std::fs::remove_file("test_mr_wrong_state.db");
     }
 }

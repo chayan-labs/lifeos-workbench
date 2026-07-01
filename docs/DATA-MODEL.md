@@ -118,6 +118,20 @@ Implemented in `lifeos-drain` (Rust). **Kept in Turso, not Cloudflare Queues** (
 ### 2.6 `module_requests` - self-extension queue
 Same claim pattern, separate lifecycle (`requested → building → installed | failed`). Survives the Mac being off. Each install is a git commit. See [SELF-EXTENSION.md](./SELF-EXTENSION.md).
 
+**Implemented (issue #76):** the lifecycle is `queued → building → installed | failed` in the
+actual `status` column (the table's own `CREATE TABLE` comment in `migrations/0001_core.sql`
+already documented this - `requested` above is the conceptual name for the initial state, the
+row's `status` value is literally `'queued'`, matching `jobs`). Unlike `jobs`, `module_requests`
+carries no `claimed_by`/`attempts` of its own - the atomicity comes from each transition being a
+single `UPDATE ... WHERE id=?1 AND status='<expected>'` (same CAS discipline `complete_job`/
+`fail_job` already use), guarding against a stale write clobbering a transition that already
+happened, rather than duplicating a full lease. `services/lifeos-drain::{claim_module_request,
+complete_module_request, fail_module_request}` implement the three transitions, each appending
+the matching `events('module.building'|'module.installed'|'module.failed')` row only when the
+transition actually applied. `GET /api/module-request/:id` exposes the current `status`/`error`
+to the requester. See [SELF-EXTENSION.md](./SELF-EXTENSION.md)'s #76 note for what's real today
+versus deferred to #78 (the live drain loop that actually calls these against a real build).
+
 ---
 
 ## 3. Control plane (SaaS-ready, single-row for personal use)

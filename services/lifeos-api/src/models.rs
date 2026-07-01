@@ -214,3 +214,32 @@ pub fn read_connection(row: &Row) -> Result<Connection, ApiError> {
         created_at: row.get(8)?,
     })
 }
+
+// ----------------------------------------------------------- module_requests
+
+pub const COLS_MODULE_REQUEST: &str =
+    "id, workspace_id, prompt, status, error, created_at, updated_at";
+
+#[derive(Serialize)]
+pub struct ModuleRequest {
+    pub id: String,
+    pub workspace_id: String,
+    pub prompt: String,
+    /// queued -> building -> installed | failed (docs/SELF-EXTENSION.md §1, issue #76).
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub fn read_module_request(row: &Row) -> Result<ModuleRequest, ApiError> {
+    Ok(ModuleRequest {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        prompt: row.get(2)?,
+        status: row.get(3)?,
+        error: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}

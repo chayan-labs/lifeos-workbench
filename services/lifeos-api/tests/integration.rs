@@ -284,6 +284,34 @@ async fn module_request_queues_a_build_job() {
 }
 
 #[tokio::test]
+async fn module_request_get_one_returns_the_queued_request_a_requester_polls() {
+    let app = test_app().await;
+    let (_, created) = send(
+        &app.router,
+        "POST",
+        "/api/module-request",
+        Some(json!({"prompt": "add a reading module"})),
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+
+    let (st, body) = send(&app.router, "GET", &format!("/api/module-request/{id}"), None).await;
+
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["id"], id);
+    assert_eq!(body["status"], "queued");
+    assert_eq!(body["prompt"], "add a reading module");
+    assert!(body["error"].is_null());
+}
+
+#[tokio::test]
+async fn module_request_get_one_404s_for_an_unknown_id() {
+    let app = test_app().await;
+    let (st, _) = send(&app.router, "GET", "/api/module-request/req_does_not_exist", None).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn agents_endpoint_lists_detected_agents() {
     let app = test_app().await;
     let (st, body) = send(&app.router, "GET", "/api/agents", None).await;

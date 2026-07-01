@@ -57,8 +57,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/search", get(search::search))
         // --- dashboards: pure SQL aggregation over events ---
         .route("/api/metrics", get(metrics::metrics))
-        // --- self-extension intake ---
+        // --- self-extension intake + lifecycle polling (issue #76) ---
         .route("/api/module-request", post(module_request::create))
+        .route("/api/module-request/:id", get(module_request::get_one))
         // --- owned-credential connect/disconnect (issue #47) ---
         .route("/api/connections", get(connection::list))
         .route("/api/connections/session", post(connection::start_session))

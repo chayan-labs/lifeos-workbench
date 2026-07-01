@@ -45,7 +45,8 @@ pub async fn modules(
 
             let sql = format!(
                 "SELECT {COLS_EVENT} FROM events \
-                 WHERE workspace_id = ?1 AND type IN ('module.requested', 'module.installed') \
+                 WHERE workspace_id = ?1 \
+                 AND type IN ('module.requested', 'module.building', 'module.installed', 'module.failed') \
                  AND id > ?2 ORDER BY id ASC LIMIT 50"
             );
             let rows = match state.conn.query(&sql, libsql::params![workspace_id.clone(), last_id.clone()]).await {

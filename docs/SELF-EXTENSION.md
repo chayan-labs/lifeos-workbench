@@ -19,6 +19,29 @@ Telegram `/addmodule …` → the bot writes `module_requests(status='queued')` 
 A `launchd` poller on the Mac drains on wake, runs the **identical** local build, commits to git, bot notifies "✅ live".
 **Codegen only ever runs on the trusted Mac; the cloud bot only enqueues.**
 
+**Implemented (issue #76):** the `queued → building → installed | failed` state machine itself,
+as atomic, tested primitives - not yet the live drain loop that calls them (that's #78, see
+below). `services/lifeos-drain/src/lib.rs` adds `claim_module_request`/`complete_module_request`/
+`fail_module_request`, each a single `UPDATE ... WHERE id=?1 AND status='<expected>'` guarded
+exactly like `complete_job`/`fail_job`'s lease check (0 rows affected = someone else already
+moved this request - never clobber a transition that already happened), and each appending the
+matching `events('module.building'|'module.installed'|'module.failed')` row only when the
+transition actually applied (a self-contained `emit_event` mirroring `lifeos_api::audit::emit`'s
+shape, since this crate has no dependency on `lifeos-api`). `GET /api/module-request/:id`
+(`services/lifeos-api/src/routes/module_request.rs`) lets a requester poll the lifecycle,
+returning `error` verbatim on `failed` - "surfaces honestly to the requester" per the issue's
+acceptance, not a generic message. The SSE filter (`stream.rs`) now includes
+`module.building`/`module.failed` alongside the two types it already carried.
+**Deliberately not wired into the live `run_job`/`dispatch` path yet**: `module_build` is still
+a `Dispatch::Stub` (§2's #72 note - no real `scaffold.js` invocation exists), and calling
+`complete_module_request` for a build that never actually ran would manufacture exactly the kind
+of false "installed" confidence the #74/#75 validators exist to prevent. #78's real drain loop
+(the one that actually shells out to `scaffoldModule()`) is what calls these three functions in
+lockstep with `claim_job`/`complete_job`/`fail_job`. Tested with 4 new `services/lifeos-drain`
+unit tests (happy path through both events, the failed path with the error surfaced, and two
+no-op-outside-expected-state cases) plus 2 new `services/lifeos-api` integration tests for the
+GET route (`200` right after `POST`, `404` for an unknown id).
+
 ---
 
 ## 2. Tool restriction - defense in depth (3 layers)
