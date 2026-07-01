@@ -56,3 +56,45 @@ Nango instance and connecting a real account needs you:
 
 This unblocks #48-55 (the rest of the integrations phase), which reuse this
 same Nango deployment and only need their own provider app registered.
+
+### #48 - Google app (Gmail + Calendar + Drive scopes)
+
+Covered by step 4 above. Scopes to request on the OAuth consent screen:
+`gmail.readonly` + `gmail.modify` (send stays gated at the API layer
+regardless), `calendar` (read+write), `drive.readonly` + `drive.file`
+(never blanket `drive` - `drive.file` only sees what the app itself creates).
+No new code needed: `POST /api/connections/session {"provider": "google"}`
+already works once the "google" integration exists in the Nango dashboard.
+
+### #49 - Notion / Slack / GitHub / Figma apps
+
+No new code needed - each is `POST /api/connections/session
+{"provider": "<key>"}` once its integration is added in the Nango dashboard
+(GitHub's OAuth app is already covered by #47 step 3). For each:
+
+- **Notion**: notion.so/my-integrations -> New integration, capabilities
+  "Read content" (+ "Update content" for the two-way sync #59 needs later).
+  Redirect URI: `http://localhost:3003/oauth/callback`.
+- **Slack**: api.slack.com/apps -> Create New App -> From scratch. OAuth
+  scopes: `channels:read`, `channels:history`, `chat:write` (posting stays
+  gated at the API layer). Redirect URL: `http://localhost:3003/oauth/callback`.
+- **Figma**: figma.com/developers/apps -> Create new app. Callback:
+  `http://localhost:3003/oauth/callback`. (Bulk of Figma access is via
+  mcp-figma at runtime - this Nango connection is only for file *metadata*.)
+
+### #50 - Meta (Instagram + WhatsApp) / X / Reddit apps
+
+No new code needed for Instagram/X/Reddit - same pattern as #49. WhatsApp
+Business Cloud is a native custom connector (not Nango), tracked separately
+as #52.
+
+- **Meta app** (developers.facebook.com/apps -> Create App -> type
+  "Business"): add the Instagram Graph API product, request
+  `instagram_basic` + `instagram_content_publish` (publish stays gated).
+  Redirect URI: `http://localhost:3003/oauth/callback`.
+- **X/Twitter app** (developer.x.com -> Projects & Apps -> Create App):
+  OAuth 2.0, scopes `tweet.read` + `tweet.write` + `users.read` (write
+  stays gated). Callback: `http://localhost:3003/oauth/callback`.
+- **Reddit app** (reddit.com/prefs/apps -> create app, type "web app"):
+  redirect URI `http://localhost:3003/oauth/callback`, scopes `read` +
+  `submit` (submit stays gated).
