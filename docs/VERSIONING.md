@@ -66,6 +66,10 @@ diff: {
 }
 ```
 
+**Implemented (issue #85):** `strategy_for`/`diff_blobs` (`services/lifeos-vcs/src/diff.rs`) is the dispatch registry that routes an entity type to a diff strategy. Only **text / code / markdown / Godot `.tscn` / `.tres`** are real, working diff pipelines - `diff_text` uses the battle-tested `similar` crate (Myers diff) for a genuine line-level diff, exactly the "first-class scene history for free" the table above promises for Godot scenes. Every other row - image, video, audio, Figma, 3D, PDF/docx - routes to `DiffStrategy::Unsupported` and `diff_blobs` returns `DiffError::UnsupportedKind` naming the specific blocking issue (`lifeos-ingest` transcription #89, image captioning / text extraction #90, or `mcp-figma` wiring) rather than a silent no-op or a fake diff. PDF/docx are the one row expected to fall out for free once #90 lands: extracted text is just text, so it reuses this same `Text` strategy rather than needing its own pipeline. The Haiku-written plain-English summary stays an orchestration concern in `server/` (same Agent SDK call pattern as `scaffold.js`, issue #72); `TextDiffResult::summary()` here is the deterministic line-count summary that call would be built from, not a replacement for it - **not yet wired up**, since the JS orchestration side and the module `diff` plugin contract itself are unbuilt.
+
+Acceptance criterion "each file type produces a meaningful diff + summary" is therefore only met for the text-backed row today; the rest is correctly, honestly blocked rather than faked. Issue left open pending #88-90/mcp-figma.
+
 ---
 
 ## 4. The `lifeos-vcs` service (Rust)

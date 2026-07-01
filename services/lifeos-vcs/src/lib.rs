@@ -1,6 +1,7 @@
 mod blob;
 mod chunk;
 mod commit;
+mod diff;
 mod gc;
 mod hash;
 mod mirror;
@@ -10,6 +11,7 @@ mod store;
 pub use blob::{read_blob, store_blob, BlobManifest};
 pub use chunk::{chunk_reader, ChunkRef};
 pub use commit::{commit_version, history, VersionEntry};
+pub use diff::{diff_blobs, diff_text, strategy_for, DiffError, DiffLine, DiffStrategy, LineTag, TextDiffResult};
 pub use gc::{live_object_hashes, mark_and_sweep, GcError, GcReport};
 pub use hash::hash_bytes;
 pub use mirror::{pull_on_demand, BlobMirror, MirrorError};
