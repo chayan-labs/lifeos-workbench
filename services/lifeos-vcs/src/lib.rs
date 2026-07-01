@@ -1,66 +1,87 @@
-use std::io::Read;
-use blake3::Hasher;
-use fastcdc::v2020::FastCDC;
+mod blob;
+mod chunk;
+mod hash;
+mod store;
 
-#[derive(Debug, Clone)]
-pub struct Chunk {
-    pub hash: String,
-    pub offset: u64,
-    pub length: u32,
-}
-
-/// Computes the BLAKE3 hash of a byte slice
-pub fn hash_bytes(data: &[u8]) -> String {
-    let mut hasher = Hasher::new();
-    hasher.update(data);
-    hasher.finalize().to_hex().to_string()
-}
-
-/// Chunks a reader using FastCDC and returns the list of chunks
-pub fn chunk_reader<R: Read>(mut reader: R) -> std::io::Result<Vec<Chunk>> {
-    let mut buffer = Vec::new();
-    reader.read_to_end(&mut buffer)?;
-
-    // Configure FastCDC with default 16KB-64KB-256KB constraints
-    let min_size = 16_384;
-    let avg_size = 65_536;
-    let max_size = 262_144;
-
-    let chunker = FastCDC::new(&buffer, min_size, avg_size, max_size);
-    let mut chunks = Vec::new();
-
-    for c in chunker {
-        let chunk_data = &buffer[c.offset..c.offset + c.length];
-        let hash = hash_bytes(chunk_data);
-        chunks.push(Chunk {
-            hash,
-            offset: c.offset as u64,
-            length: c.length as u32,
-        });
-    }
-
-    Ok(chunks)
-}
+pub use blob::{read_blob, store_blob, BlobManifest};
+pub use chunk::{chunk_reader, ChunkRef};
+pub use hash::hash_bytes;
+pub use store::ObjectStore;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_hash_bytes() {
-        let data = b"hello life-os";
-        let h = hash_bytes(data);
-        assert_eq!(h.len(), 64);
+    fn store_and_retrieve_roundtrip_by_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::new(dir.path());
+        let data = b"the quick brown fox jumps over the lazy dog".repeat(1000);
+
+        let blob_ref = store_blob(&store, &data).unwrap();
+        let retrieved = read_blob(&store, &blob_ref).unwrap();
+
+        assert_eq!(retrieved, data);
     }
 
     #[test]
-    fn test_chunking() {
-        let mut data = vec![0u8; 200_000];
-        // add some pattern
-        for i in 0..data.len() {
-            data[i] = (i % 251) as u8;
-        }
-        let chunks = chunk_reader(&data[..]).unwrap();
-        assert!(!chunks.is_empty());
+    fn storing_the_same_content_twice_dedups() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::new(dir.path());
+        let data = b"identical payload".repeat(5000);
+
+        let first_ref = store_blob(&store, &data).unwrap();
+        let count_after_first = count_objects(dir.path());
+
+        let second_ref = store_blob(&store, &data).unwrap();
+        let count_after_second = count_objects(dir.path());
+
+        assert_eq!(first_ref, second_ref);
+        assert_eq!(count_after_first, count_after_second);
+    }
+
+    #[test]
+    fn different_content_produces_different_blob_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::new(dir.path());
+
+        let a = store_blob(&store, b"content a").unwrap();
+        let b = store_blob(&store, b"content b").unwrap();
+
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn objects_are_laid_out_under_objects_hh_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::new(dir.path());
+        let data = b"layout check";
+
+        let blob_ref = store_blob(&store, data).unwrap();
+
+        let expected = dir
+            .path()
+            .join("objects")
+            .join(&blob_ref[..2])
+            .join(&blob_ref);
+        assert!(expected.exists());
+    }
+
+    #[test]
+    fn write_object_reports_whether_it_was_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::new(dir.path());
+        let h = hash_bytes(b"dedup me");
+
+        assert!(store.write_object(&h, b"dedup me").unwrap());
+        assert!(!store.write_object(&h, b"dedup me").unwrap());
+    }
+
+    fn count_objects(root: &std::path::Path) -> usize {
+        walkdir::WalkDir::new(root.join("objects"))
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .count()
     }
 }

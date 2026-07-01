@@ -1672,6 +1672,7 @@ dependencies = [
  "fastcdc",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "walkdir",
 ]

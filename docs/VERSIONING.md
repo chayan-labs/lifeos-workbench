@@ -81,6 +81,8 @@ Why Rust: tight hashing/IO loops, large-file throughput, memory safety on a secu
 
 CLI surface (thin, allow-listed): `lifeos file commit|diff|log|checkout|snapshot|branch|tag`.
 
+**Implemented (issue #81):** the CAS object store itself — `services/lifeos-vcs`. `ObjectStore` (`src/store.rs`) lays blobs out under `objects/<hh>/<hash>` local to a configurable root (mirroring to R2/S3 is a later issue), and `write_object` is a no-op when the hash already exists — dedup falls directly out of content addressing rather than an explicit check. `store_blob`/`read_blob` (`src/blob.rs`) implement §2.2's manifest model exactly: `chunk_reader` (`src/chunk.rs`) splits the input via FastCDC, each chunk is written as its own object (so chunk-level dedup works across different blobs that happen to share content-defined chunks), the ordered list of chunk hashes is serialized as a `BlobManifest`, and the blob's `blob_ref` is the hash of that manifest JSON — not the hash of the raw bytes. No commit/diff/snapshot/branch/GC yet; those are separate issues (#82+) layered on top of this store.
+
 ---
 
 ## 5. Interaction with sync & gating
