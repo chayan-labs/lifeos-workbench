@@ -1,5 +1,126 @@
-import React, { useState } from 'react';
-import { FileCode, Play, FileAudio, Search, GitCommit, ArrowRight, Eye, Diff } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { FileCode, Play, FileAudio, Search, GitCommit, ArrowRight, Eye, Diff, UploadCloud, RefreshCw } from 'lucide-react';
+import { apiCall } from '../lib/api';
+import { listFileEntities } from '../lib/vcsApi';
+
+// Same poll-only-while-active pattern as pages/Database.jsx's JOBS_POLL_MS.
+const INGEST_POLL_MS = 3000;
+
+// Real ingest status panel (issue #91): file.imported/version.created now
+// auto-enqueue an ingest job (services/lifeos-api routes/files.rs,
+// routes/drive.rs); this panel is the manual trigger + status/segment-count/
+// re-index UI docs/MEDIA-INTELLIGENCE.md §4 and frontend/FRONTEND.md §2 call
+// for, backed by real POST /api/ingest + GET /api/entity, not mock data.
+function IngestStatusPanel() {
+  const [files, setFiles] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [statusById, setStatusById] = useState({});
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+
+  const loadFiles = useCallback(() => {
+    listFileEntities()
+      .then((data) => {
+        setFiles(data);
+        if (!selectedId && data.length) setSelectedId(data[0].id);
+      })
+      .catch((e) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => { loadFiles(); }, [loadFiles]);
+
+  const refreshStatus = useCallback(async (entityId) => {
+    const [entityRes, segmentsRes] = await Promise.all([
+      apiCall('GET', `/api/entity/${encodeURIComponent(entityId)}`),
+      apiCall('GET', `/api/entity?type=segment&parent_id=${encodeURIComponent(entityId)}`),
+    ]);
+    const attrs = entityRes.ok ? entityRes.data?.attrs || {} : {};
+    const segmentCount = segmentsRes.ok && Array.isArray(segmentsRes.data) ? segmentsRes.data.length : 0;
+    setStatusById((prev) => ({
+      ...prev,
+      [entityId]: {
+        ingestStatus: attrs.ingest_status || (segmentCount > 0 || attrs.transcript_ref ? 'completed' : 'not_ingested'),
+        blockedBy: attrs.ingest_blocked_by || null,
+        segmentCount,
+        hasTranscript: Boolean(attrs.transcript_ref),
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    refreshStatus(selectedId);
+    const status = statusById[selectedId];
+    if (busyId !== selectedId && status?.ingestStatus !== 'not_ingested') return undefined;
+    const interval = setInterval(() => refreshStatus(selectedId), INGEST_POLL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, busyId]);
+
+  const triggerIngest = async (entityId) => {
+    setBusyId(entityId);
+    setError('');
+    const { ok, error: err } = await apiCall('POST', '/api/ingest', { entity_id: entityId });
+    if (!ok) setError(err || 'ingest enqueue failed');
+    await refreshStatus(entityId);
+    setBusyId(null);
+  };
+
+  const current = selectedId ? statusById[selectedId] : null;
+
+  return (
+    <div className="neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
+      <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4 flex items-center gap-2">
+        <UploadCloud size={18} />
+        Ingest Status
+      </h3>
+
+      {error && <div className="text-xs text-neo-red mb-3">{error}</div>}
+
+      <div className="flex gap-2 mb-4">
+        <select
+          className="neo-input flex-1 text-xs"
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          {files.length === 0 && <option value="">No file entities yet - commit one first</option>}
+          {files.map((f) => (
+            <option key={f.id} value={f.id}>{f.attrs?.name || f.id}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => selectedId && triggerIngest(selectedId)}
+          disabled={!selectedId || busyId === selectedId}
+          className="neo-btn py-1.5 px-3 bg-neo-yellow text-[10px] font-bold flex items-center gap-1 disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={busyId === selectedId ? 'animate-spin' : ''} />
+          {current?.ingestStatus === 'not_ingested' ? 'Ingest' : 'Re-index'}
+        </button>
+      </div>
+
+      {current && (
+        <div className="p-3 bg-neo-bg neo-border text-xs flex flex-col gap-1.5">
+          <div className="flex justify-between items-center">
+            <span className="font-bold">Status</span>
+            <span className={`neo-chip py-0.5 text-[9px] ${current.ingestStatus === 'unsupported' ? 'neo-chip--review' : 'neo-chip--completed'}`}>
+              {(busyId === selectedId ? 'queued' : current.ingestStatus).toUpperCase()}
+            </span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-neo-text-muted">Segments</span>
+            <span className="font-mono">{current.segmentCount}</span>
+          </div>
+          {current.blockedBy && (
+            <div className="pt-1.5 border-t border-neo-border border-dashed text-[10px] italic text-neo-text-muted">
+              Blocked: {current.blockedBy}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function VcsIngest() {
   const [transcriptionQuery, setTranscriptionQuery] = useState('Nango credentials proxy');
@@ -64,9 +185,12 @@ export default function VcsIngest() {
         </p>
       </div>
 
+      {/* Ingest Status - real, backed by POST /api/ingest + GET /api/entity (issue #91) */}
+      <IngestStatusPanel />
+
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
+
         {/* Version Control list */}
         <div className="lg:col-span-6 neo-surface neo-border-thick neo-shadow p-5 bg-neo-surface">
           <h3 className="neo-title-md border-b-2 border-neo-border pb-3 mb-4 flex items-center gap-2">

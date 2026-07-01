@@ -152,6 +152,26 @@ pub async fn sync(
         if upsert_drive_file(&state, &workspace_id, drive_id, name, &attrs).await? {
             synced += 1;
             emit(&state.conn, &workspace_id, "file.imported", Some(&entity_id), "google-drive", &attrs).await.ok();
+            // Auto-trigger ingest on file.imported (docs/MEDIA-INTELLIGENCE.md
+            // §4, issue #91) - only when there's real content to ingest.
+            // Drive-synced files have no download path yet (see this fn's doc
+            // comment: blob_ref stays NULL), so this guard means auto-enqueue
+            // doesn't fire for Drive imports today - it's forward-wired for
+            // once a real download/re-upload path lands, rather than
+            // enqueueing a job lifeos-ingest can't process.
+            if let Some(blob_ref) = attrs.get("blob_ref").and_then(Value::as_str) {
+                if let Err(e) = super::job::enqueue(
+                    &state,
+                    &workspace_id,
+                    "ingest",
+                    &json!({ "entity_id": entity_id, "blob_ref": blob_ref }),
+                    0,
+                )
+                .await
+                {
+                    tracing::warn!("auto-ingest enqueue failed for {entity_id}: {e:?}");
+                }
+            }
         } else {
             skipped += 1;
         }

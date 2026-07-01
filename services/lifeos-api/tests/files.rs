@@ -275,6 +275,48 @@ async fn recommitting_identical_content_is_rejected() {
 }
 
 #[tokio::test]
+async fn commit_auto_enqueues_an_ingest_job() {
+    let ta = test_app().await;
+    let ws = register(&ta.router, "commit-autoingest").await;
+
+    let (st, body) = send_h(
+        &ta.router,
+        "POST",
+        "/api/files/commit",
+        Some(json!({"name": "notes.md", "content": "auto-ingest me", "workspace_id": ws})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body:?}");
+    let id = body["id"].as_str().unwrap().to_string();
+    let blob_ref = body["attrs"]["blob_ref"].as_str().unwrap().to_string();
+
+    let (st, jobs) = send_h(&ta.router, "GET", &format!("/api/jobs?workspace_id={ws}&kind=ingest"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let jobs = jobs.as_array().unwrap();
+    assert_eq!(jobs.len(), 1, "commit must auto-enqueue exactly one ingest job, {jobs:?}");
+    assert_eq!(jobs[0]["payload"]["entity_id"], id);
+    assert_eq!(jobs[0]["payload"]["blob_ref"], blob_ref);
+}
+
+#[tokio::test]
+async fn drive_sync_does_not_enqueue_ingest_without_a_blob_ref() {
+    let ta = test_app().await;
+    let ws = register(&ta.router, "drive-sync-noingest").await;
+    connect(&ta.router, &ta.nango, &ws).await;
+    seed_files(&ta.nango);
+
+    let (st, body) = send_h(&ta.router, "POST", "/api/drive/sync", Some(json!({"workspace_id": ws}))).await;
+    assert_eq!(st, StatusCode::OK, "{body:?}");
+
+    let (st, jobs) = send_h(&ta.router, "GET", &format!("/api/jobs?workspace_id={ws}&kind=ingest"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        jobs.as_array().unwrap().is_empty(),
+        "Drive-synced files have no blob_ref yet, so auto-ingest must not enqueue a job it can't process"
+    );
+}
+
+#[tokio::test]
 async fn workspace_b_has_no_workspace_as_files() {
     let ta = test_app().await;
     let ws_a = register(&ta.router, "files-tenant-a").await;

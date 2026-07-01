@@ -66,7 +66,7 @@ Each row is one work item: the route, where it lands in the UI, and what to repl
 
 | Route | Lands in |
 | --- | --- |
-| `POST /api/ingest` | `VcsIngest.jsx` - add a file/URI picker, submit, then poll the job |
+| `POST /api/ingest` | `VcsIngest.jsx`'s "Ingest Status" panel (issue #91) - file picker from `GET /api/entity?module=files&type=file`, submit, poll `GET /api/entity/:id` + `GET /api/entity?type=segment&parent_id=<id>` for status/segment count |
 | `POST /api/pipeline/run` | `Dashboard.jsx` pipeline trigger - replace the `setTimeout` animation with a real enqueue + run-status from `events` |
 
 **Planned routes (honest 501) - keep declared, show a "ships in phase N" state, do not fake success:**

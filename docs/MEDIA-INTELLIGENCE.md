@@ -104,9 +104,21 @@ fabricating any.
 
 ## 4. Triggers & freshness
 
-- On `file.imported` / `asset.generated` / `version.created` → enqueue an ingest job.
-- On a new file **version**, re-derive segments for that version so search reflects the latest content (old versions remain searchable via their snapshot, see [VERSIONING.md](./VERSIONING.md)).
+**Implemented (issue #91):** `version.created` (`services/lifeos-api/src/routes/files.rs`,
+local content-addressed commit) and `file.imported` (`services/lifeos-api/src/routes/drive.rs`,
+Drive sync) auto-enqueue an `ingest` job right after their `emit()` call, reusing the same
+`job::enqueue` helper `POST /api/ingest` already used - no separate rules engine, since none
+exists yet (`lifeos-pipelines`'s Life OS Actions engine, issue #93, is still a stub). A failed
+enqueue never fails the parent commit/import (fire-and-forget, same reasoning as `Embedder::
+embed`). `asset.generated` has no emitter anywhere in the codebase yet - no Design/Marketing
+module produces generated assets in this phase - so it isn't wired; wire it at that module's
+emit site once it lands. Drive-synced files don't auto-enqueue in practice yet either: `blob_ref`
+stays `null` until a real download/re-upload path exists (see `routes/drive.rs`'s doc comment),
+and the trigger is guarded on a real `blob_ref` being present.
+
+- On a new file **version**, re-derive segments for that version so search reflects the latest content (old versions remain searchable via their snapshot, see [VERSIONING.md](./VERSIONING.md)). Note: today's re-ingest (manual or auto) *adds* fresh segments rather than diffing/superseding old ones for the same version - true re-derive-on-new-version dedup is a later refinement, same scope boundary as CLIP embeddings below.
 - Reading-module articles and Email bodies also flow through the text path (no transcription needed) → one unified semantic index across *all* content.
+- Frontend: `frontend/src/pages/VcsIngest.jsx`'s "Ingest Status" panel (rendered under Storage & VCS → Media Ingest) shows real status/segment count per file (`GET /api/entity/:id` + `GET /api/entity?type=segment&parent_id=<id>`) and a manual Ingest/Re-index trigger (`POST /api/ingest`) for when the automatic triggers above don't apply.
 
 ---
 

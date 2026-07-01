@@ -101,6 +101,24 @@ pub async fn commit(
     )
     .await?;
 
+    // Auto-trigger ingest on version.created (docs/MEDIA-INTELLIGENCE.md §4,
+    // issue #91). The third documented trigger, asset.generated, has no
+    // emitter anywhere in this codebase yet - no Design/Marketing module
+    // exists to produce generated assets - so it isn't wired here; wire it
+    // at that module's emit site once it lands. A failed enqueue never fails
+    // the commit itself, same fire-and-forget reasoning as `Embedder::embed`.
+    if let Err(e) = super::job::enqueue(
+        &state,
+        &workspace_id,
+        "ingest",
+        &json!({ "entity_id": id, "blob_ref": blob_ref }),
+        0,
+    )
+    .await
+    {
+        tracing::warn!("auto-ingest enqueue failed for {id}: {e:?}");
+    }
+
     fetch_one(&state, &workspace_id, &id).await
 }
 
