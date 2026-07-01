@@ -372,6 +372,30 @@ export const EMAIL_MANIFEST = {
   ],
 };
 
+// Reads (`cal.sync|read`) are unconditionally free; `cal.create|move` stay
+// gated through the same draft.create -> human-approve path every other
+// outward write uses (services/lifeos-api/src/routes/calendar.rs) - this
+// manifest declares a `sync` action (materializes entities via
+// POST /api/calendar/sync) but the agenda/calendar views are read-only, so
+// there is no drag-to-move affordance for `GenericCalendar` to expose.
+export const CALENDAR_MANIFEST = {
+  id: 'calendar',
+  name: 'Calendar',
+  icon: '📅',
+  sync: { label: 'Sync events', path: '/api/calendar/sync' },
+  entityTypes: {
+    calendar_event: {
+      label: 'Event',
+      plural: 'Events',
+      display: { title: 'title', subtitle: (e) => e.attrs?.location, badge: (e) => e.attrs?.start?.slice(11, 16) },
+    },
+  },
+  views: [
+    { id: 'calendar', label: 'Calendar', kind: 'calendar', type: 'calendar_event', dateField: 'start' },
+    { id: 'agenda', label: 'Agenda', kind: 'list', type: 'calendar_event' },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -381,6 +405,7 @@ export const MODULE_MANIFESTS = {
   marketing: MARKETING_MANIFEST,
   design: DESIGN_MANIFEST,
   email: EMAIL_MANIFEST,
+  calendar: CALENDAR_MANIFEST,
 };
 
 export function getManifest(id) {

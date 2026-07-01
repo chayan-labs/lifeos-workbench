@@ -28,7 +28,8 @@ import {
   Sparkles,
   History,
   Gauge,
-  Mail
+  Mail,
+  Calendar
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -113,6 +114,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Marketing', href: '/m/marketing', icon: LayoutDashboard },
         { name: 'Design', href: '/m/design', icon: Boxes },
         { name: 'Email', href: '/m/email', icon: Mail },
+        { name: 'Calendar', href: '/m/calendar', icon: Calendar },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },

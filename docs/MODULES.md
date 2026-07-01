@@ -155,6 +155,18 @@ materialization and reply-drafting are deferred; the triage board (the acceptanc
 - **Tools:** `cal.sync|read` (free), `cal.create|move` 🔒.
 - **AI:** "schedule X around my free slots" → drafts event; daily agenda in digest.
 
+**Implemented (issue #57):** `POST /api/calendar/sync` materializes Google Calendar's `events.list` proxy response as
+`calendar_event` entities, idempotently (`services/lifeos-api/src/routes/calendar.rs`), keyed on the provider's own
+event id (`source_uid`) so re-syncing never duplicates. `POST /api/calendar/move` was added alongside the existing
+`POST /api/calendar/create` (#53) - both only ever create a `pending_approval` draft entity
+(`calendar_create`/`calendar_move`) and have no code path to Calendar's insert/patch APIs. The live SPA's Calendar
+module (`frontend/src/lib/moduleManifests.js::CALENDAR_MANIFEST`, routed at `/m/calendar`) renders calendar/agenda
+views through the generic renderer system, reusing the same `manifest.sync` "Sync events" action introduced for
+Email (#56). `GenericCalendar` is a read-only agenda view with no drag-to-move affordance, so gating `move` is
+enforced structurally the same way as `send`/`act` elsewhere: the UI has no path to it beyond drafting.
+`calendar`(container)-entity materialization and the approve→execute queue for
+`calendar.move.drafted`/`calendar.create.drafted` are deferred to the Bot-phase executor work.
+
 ### 3.3 Files (Drive + local, versioned by lifeos-vcs)
 - **Entity types:** `file`, `folder` (reuse `asset` for media).
 - **attrs:** `{name, mime, size, blob_ref, drive_id?, version_no, parent_folder}`.

@@ -78,6 +78,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/gmail/sync", post(gmail::sync))
         .route("/api/calendar/list", get(calendar::list))
         .route("/api/calendar/create", post(calendar::create))
+        .route("/api/calendar/move", post(calendar::move_event))
+        // --- Calendar module: materialize Calendar events as entities (issue #57) ---
+        .route("/api/calendar/sync", post(calendar::sync))
         .route("/api/drive/list", get(drive::list))
         .route("/api/drive/upload", post(drive::upload))
         .route("/api/notion/list", get(notion::list))
