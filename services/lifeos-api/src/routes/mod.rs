@@ -6,6 +6,7 @@ mod connection;
 mod drive;
 mod entity;
 mod event;
+mod files;
 mod gmail;
 mod health;
 mod job;
@@ -83,6 +84,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/calendar/sync", post(calendar::sync))
         .route("/api/drive/list", get(drive::list))
         .route("/api/drive/upload", post(drive::upload))
+        .route("/api/drive/share", post(drive::share))
+        // --- Files module: materialize Drive files + local version-history
+        //     commits (issue #58) ---
+        .route("/api/drive/sync", post(drive::sync))
+        .route("/api/files/commit", post(files::commit))
         .route("/api/notion/list", get(notion::list))
         .route("/api/notion/create", post(notion::create))
         .route("/api/slack/list", get(slack::list))

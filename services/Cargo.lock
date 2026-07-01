@@ -1509,6 +1509,7 @@ dependencies = [
  "hmac",
  "jsonwebtoken",
  "libsql",
+ "lifeos-vcs",
  "rand 0.8.6",
  "reqwest",
  "serde",

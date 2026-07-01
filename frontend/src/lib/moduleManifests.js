@@ -396,6 +396,40 @@ export const CALENDAR_MANIFEST = {
   ],
 };
 
+// `drive.sync|read` and local `file.commit` are free; `drive.upload|share`
+// stay gated through the same draft.create -> human-approve path every
+// other outward write uses (services/lifeos-api/src/routes/{drive,files}.rs).
+// Version history (docs/VERSIONING.md) is a query over `events` for a given
+// entity id, not a bespoke field here - the table view surfaces `version_no`
+// (the latest version number) so a change is visible without a dedicated
+// timeline UI, which is deferred.
+export const FILES_MANIFEST = {
+  id: 'files',
+  name: 'Files',
+  icon: '🗂️',
+  sync: { label: 'Sync Drive', path: '/api/drive/sync' },
+  entityTypes: {
+    file: {
+      label: 'File',
+      plural: 'Files',
+      display: { title: 'name', subtitle: (e) => e.attrs?.mime, badge: (e) => e.attrs?.version_no ? `v${e.attrs.version_no}` : null },
+    },
+    folder: {
+      label: 'Folder',
+      plural: 'Folders',
+      display: { title: 'title' },
+    },
+  },
+  views: [
+    { id: 'browse', label: 'Browse', kind: 'table', type: 'file', columns: [
+      { key: 'name', label: 'Name', truncate: true },
+      { key: 'mime', label: 'Type' },
+      { key: 'version_no', label: 'Version' },
+      { key: 'parent_folder', label: 'Folder' },
+    ] },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -406,6 +440,7 @@ export const MODULE_MANIFESTS = {
   design: DESIGN_MANIFEST,
   email: EMAIL_MANIFEST,
   calendar: CALENDAR_MANIFEST,
+  files: FILES_MANIFEST,
 };
 
 export function getManifest(id) {

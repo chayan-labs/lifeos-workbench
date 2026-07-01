@@ -24,6 +24,7 @@ base64 = "0.22"
 rand = "0.8"
 hmac = "0.12"
 hex = "0.4"
+lifeos-vcs = { path = "../lifeos-vcs" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

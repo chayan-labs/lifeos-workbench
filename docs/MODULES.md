@@ -176,6 +176,21 @@ enforced structurally the same way as `send`/`act` elsewhere: the UI has no path
 - **Tools:** `drive.sync|read` (free), `file.commit|diff|checkout` (free, local), `drive.upload|share` 🔒.
 - **Key value:** Drive files gain real semantic version history Drive itself doesn't provide.
 
+**Implemented (issue #58):** `POST /api/drive/sync` materializes Google Drive's `files.list` proxy response as `file`
+entities, idempotently (`services/lifeos-api/src/routes/drive.rs`), keyed on the provider's own file id (`drive_id`).
+`POST /api/drive/share` was added alongside the existing `POST /api/drive/upload` (#53) - both only ever create a
+`pending_approval` draft entity and never call Drive's upload/permissions APIs.
+`POST /api/files/commit` (`services/lifeos-api/src/routes/files.rs`) is the first real slice of `lifeos-vcs`
+(docs/VERSIONING.md §2.1/§2.3): it hashes text content with `lifeos_vcs::hash_bytes` (BLAKE3), upserts the `file`
+entity's `blob_ref`/`version_no`, and appends a `version.created` event whose `parent_blob_ref` chains to the prior
+version - version history is exactly `GET /api/event?entity_id=<id>&type=version.created`, no separate table, per
+§2.3. Re-committing identical content is rejected (400) rather than creating a no-op version. The live SPA's Files
+module (`frontend/src/lib/moduleManifests.js::FILES_MANIFEST`, routed at `/m/files`) browses files through a
+generic table view (name/type/version/folder columns) plus the shared "Sync Drive" action. FastCDC chunking for
+large binary blobs, per-type semantic diff, snapshot/branch/tag, and a dedicated version-timeline UI are deferred -
+this ships the content-addressed commit/history data model and the free read/local-commit + gated upload/share
+tool surface the acceptance criterion calls for.
+
 ### 3.4 Notion (migrate-in, two-way, owned)
 - **Entity types:** `note`/`doc`, `notion_db`, `notion_page` (mirror).
 - **Edges:** `note ─mirrors→ notion_page`.
