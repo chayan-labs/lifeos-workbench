@@ -30,7 +30,8 @@ import {
   Gauge,
   Mail,
   Calendar,
-  FolderOpen
+  FolderOpen,
+  StickyNote
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -117,6 +118,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Email', href: '/m/email', icon: Mail },
         { name: 'Calendar', href: '/m/calendar', icon: Calendar },
         { name: 'Files', href: '/m/files', icon: FolderOpen },
+        { name: 'Notion', href: '/m/notion', icon: StickyNote },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },

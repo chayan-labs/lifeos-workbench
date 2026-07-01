@@ -91,6 +91,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/commit", post(files::commit))
         .route("/api/notion/list", get(notion::list))
         .route("/api/notion/create", post(notion::create))
+        // --- Notion module: two-way sync in/back (issue #59) ---
+        .route("/api/notion/sync", post(notion::sync))
+        .route("/api/notion/push", post(notion::push))
         .route("/api/slack/list", get(slack::list))
         .route("/api/slack/post", post(slack::post))
         // --- browser actuator: free read-only scrape, gated act, one

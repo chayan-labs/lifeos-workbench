@@ -430,6 +430,40 @@ export const FILES_MANIFEST = {
   ],
 };
 
+// `note.sync` (read pages/databases in) is free; the "edits propagate back"
+// half is `POST /api/notion/push`, gated the same way as every other
+// outward write - reachable from EntityDetailPanel's "Push to Notion"
+// button (shown for `notion.note` entities), not a manifest-level action,
+// since it's a per-entity push rather than a bulk sync.
+export const NOTION_MANIFEST = {
+  id: 'notion',
+  name: 'Notion',
+  icon: '📝',
+  sync: { label: 'Sync from Notion', path: '/api/notion/sync' },
+  entityTypes: {
+    note: {
+      label: 'Note',
+      plural: 'Notes',
+      display: { title: 'title' },
+    },
+    notion_page: {
+      label: 'Notion Page',
+      plural: 'Notion Pages',
+      display: { title: 'title', subtitle: (e) => e.attrs?.last_edited_time },
+    },
+    notion_db: {
+      label: 'Notion Database',
+      plural: 'Notion Databases',
+      display: { title: 'title' },
+    },
+  },
+  views: [
+    { id: 'notes', label: 'Notes', kind: 'list', type: 'note' },
+    { id: 'pages', label: 'Mirrored Pages', kind: 'list', type: 'notion_page' },
+    { id: 'databases', label: 'Databases', kind: 'list', type: 'notion_db' },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -441,6 +475,7 @@ export const MODULE_MANIFESTS = {
   email: EMAIL_MANIFEST,
   calendar: CALENDAR_MANIFEST,
   files: FILES_MANIFEST,
+  notion: NOTION_MANIFEST,
 };
 
 export function getManifest(id) {

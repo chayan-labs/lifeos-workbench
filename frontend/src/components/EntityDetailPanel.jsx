@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Share2, Activity } from 'lucide-react';
+import { X, Share2, Activity, UploadCloud } from 'lucide-react';
 import { apiCall } from '../lib/api';
 import GenericDetail from '../core/renderers/GenericDetail';
 
@@ -14,6 +14,8 @@ export default function EntityDetailPanel({ entityId, onClose }) {
   const [linkTarget, setLinkTarget] = useState('');
   const [linkRel, setLinkRel] = useState('relates_to');
   const [linkError, setLinkError] = useState('');
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState(null);
 
   const loadRelations = (id) => {
     Promise.all([
@@ -67,6 +69,25 @@ export default function EntityDetailPanel({ entityId, onClose }) {
     });
   };
 
+  // Notion's "edits propagate back" half (issue #59, docs/MODULES.md §3.4):
+  // pushing a mirrored `note` only ever drafts a pending Notion update
+  // (services/lifeos-api/src/routes/notion.rs::push) - never writes to
+  // Notion directly, same approve->execute queue as every other gated write.
+  const handlePushToNotion = () => {
+    setPushing(true);
+    setPushResult(null);
+    apiCall('POST', '/api/notion/push', { entity_id: entityId }).then(({ ok, error, status }) => {
+      setPushing(false);
+      setPushResult(
+        ok
+          ? 'Drafted - awaiting approval before it reaches Notion.'
+          : status === 501
+            ? 'Not configured yet - see docs/MANUAL-SETUP.md.'
+            : error || 'Push failed.'
+      );
+    });
+  };
+
   if (!entityId) return null;
 
   return (
@@ -85,6 +106,19 @@ export default function EntityDetailPanel({ entityId, onClose }) {
         {state === 'ready' && entity && (
           <>
             <GenericDetail entity={entity} display={{ title: 'title' }} />
+
+            {entity.module === 'notion' && entity.type === 'note' && (
+              <div>
+                <button
+                  onClick={handlePushToNotion}
+                  disabled={pushing}
+                  className="neo-btn py-1.5 px-3 bg-neo-yellow text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <UploadCloud size={12} /> {pushing ? 'Pushing…' : 'Push to Notion'}
+                </button>
+                {pushResult && <p className="text-[10px] text-neo-text-muted font-mono mt-1.5">{pushResult}</p>}
+              </div>
+            )}
 
             <div>
               <h4 className="neo-label-md mb-2 text-neo-text-muted flex items-center gap-1.5"><Share2 size={14} /> Relations ({edges.length})</h4>

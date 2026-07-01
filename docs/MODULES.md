@@ -197,6 +197,20 @@ tool surface the acceptance criterion calls for.
 - **Events:** `note.synced`.
 - **Flow:** import pages/databases → entities; two-way `syncTargets`; migrate gradually, then **deprecate Notion for real.**
 
+**Implemented (issue #59):** `POST /api/notion/sync` materializes Notion's `/v1/search` results
+(`services/lifeos-api/src/routes/notion.rs`): each page becomes a `notion_page` mirror entity (raw Notion state)
+plus a native `note` entity - the one a user actually edits - linked by a `note ─mirrors→ notion_page` edge; each
+database becomes a `notion_db` entity. All three are idempotently keyed on the provider's own id. "Edits propagate
+back" is `POST /api/notion/push`: gated the same way as every other outward write - it only ever creates a
+`pending_approval` draft carrying the note's current title/content, never calls Notion's page-update API. Reachable
+from the live SPA via `EntityDetailPanel`'s "Push to Notion" button (shown for `notion.note` entities) rather than a
+bulk manifest action, since a push is per-entity. `frontend/src/lib/moduleManifests.js::NOTION_MANIFEST`
+(routed at `/m/notion`) browses notes/mirrored pages/databases through the generic list renderer plus the shared
+"Sync from Notion" pull action. Deferred: real Notion block-content sync (only titles/metadata are mirrored today),
+the `syncTargets` config-driven two-way engine, conflict resolution for concurrent edits, and the approve→execute
+queue that would actually write `notion_push` drafts back out - the same Bot-phase boundary as every other gated
+write in this milestone (#52/#53/#56/#57/#58).
+
 ### 3.5 Slack (owned)
 - **Entity types:** `channel`, `message`.
 - **Tools:** read free; `slack.post` 🔒. Doubles as a second capture/notify surface alongside Telegram.
