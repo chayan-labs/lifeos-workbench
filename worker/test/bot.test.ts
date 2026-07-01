@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserFromGetMe } from "grammy/types";
 import type { LocalDb } from "@lifeos/db/client/local";
+import { events } from "@lifeos/db";
+import { eq } from "@lifeos/db/query";
 import { createBot, healthMessage, type BotDeps } from "../src/bot.js";
 import { createTestDb } from "./testDb.js";
 
@@ -318,6 +320,42 @@ describe("createBot - recall (issue #69)", () => {
     await bot.handleUpdate(textUpdate("/recall halting"));
 
     expect(sent[1]).toContain("the halting problem");
+  });
+});
+
+describe("createBot - audit logging (issue #70)", () => {
+  it("records a bot.command event for every command, including plain reads", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    repliesFrom(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/pnl"));
+
+    const rows = await db.select().from(events).where(eq(events.workspaceId, WS));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe("bot.command");
+    expect(rows[0].actor).toBe("bot");
+    expect(JSON.parse(rows[0].attrs ?? "{}")).toEqual({ text: "/pnl" });
+  });
+
+  it("does not record an event for non-command text", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    repliesFrom(bot);
+
+    await bot.init();
+    await bot.handleUpdate({
+      update_id: 9,
+      message: {
+        message_id: 9,
+        date: 0,
+        chat: { id: 1, type: "private" as const, first_name: "tester" },
+        from: { id: 1, is_bot: false, first_name: "tester" },
+        text: "hello there",
+      },
+    });
+
+    const rows = await db.select().from(events).where(eq(events.workspaceId, WS));
+    expect(rows).toHaveLength(0);
   });
 });
 

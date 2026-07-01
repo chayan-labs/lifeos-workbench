@@ -41,6 +41,12 @@ is a separate, not-yet-scoped piece of work.
   Python subprocess - neither is reachable from a Cloudflare Worker (no filesystem, and the
   Mac API only binds 127.0.0.1). This command trades recall quality for laptop-off
   availability: a case-insensitive `LIKE` over `title`/`attrs` in the canonical Turso DB.
+- Issue #70: audit logging - a `bot.use` middleware in `src/bot.ts` records an
+  `events(type='bot.command', actor='bot', attrs={text})` row for every incoming `/command`
+  before it runs (append-only, never an UPDATE/DELETE), so bot activity - including plain
+  reads like `/today`/`/pnl`, not just #66's approve/deny transitions - is fully
+  reconstructable from `events`. Non-command text (no `/` prefix) is not logged, since it's
+  never routed to a handler either.
 
 Every DB query in `src/entities.ts` filters by `workspace_id`, resolved server-side from
 `env.WORKSPACE_ID` (never from Telegram input) via `resolveWorkspaceId()` in `src/db.ts`.

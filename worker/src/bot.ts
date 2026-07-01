@@ -3,6 +3,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { WorkerDb } from "@lifeos/db/client/worker";
 import { approveEntity, denyEntity, listPendingApprovals } from "./approvals.js";
+import { recordEvent } from "./events.js";
 import {
   captureDraft,
   captureTask,
@@ -41,6 +42,19 @@ function approvalKeyboard(entityId: string): InlineKeyboard {
 export function createBot(deps: BotDeps, botInfo?: UserFromGetMe): Bot {
   const bot = new Bot(deps.token, botInfo ? { botInfo } : undefined);
   const { db, workspaceId } = deps;
+
+  // issue #70: every command is an audit event before it runs, not just the
+  // ones (#66's approve/deny) that already recorded their own
+  // richer-typed event - so "bot activity is fully reconstructable from
+  // events" holds for reads (`/today`, `/pnl`, ...) too, not just writes.
+  // `events` is append-only (docs/SECURITY.md §1); this only ever inserts.
+  bot.use(async (ctx, next) => {
+    const text = ctx.message?.text;
+    if (text?.startsWith("/")) {
+      await recordEvent(db, workspaceId, "bot.command", null, { text });
+    }
+    await next();
+  });
 
   bot.command("start", async (ctx) => {
     await ctx.reply("Life OS bot is online.");

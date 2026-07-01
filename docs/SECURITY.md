@@ -12,6 +12,12 @@ Layered, fail-closed boundaries. Auditability over speed; gate the irreversible.
 - **Secrets:** OAuth tokens live in **Nango** (encrypted), the agent holds only a `connectionId`; the few non-Nango secrets (Kite daily token, WhatsApp) are envelope-encrypted in `connections.secret_enc`. **Never in agent context, never in logs.**
 - **`events` append-only:** no UPDATE/DELETE route, so even the RW token cannot rewrite history.
 
+**Implemented (issue #70):** `worker/src/bot.ts` registers a `bot.use` middleware, ahead of
+every `bot.command(...)` handler, that inserts `events(type='bot.command', actor='bot',
+attrs={text})` for every incoming `/command` - so bot activity (not just #66's
+approve/deny transitions, which already recorded their own richer-typed events) is fully
+reconstructable from `events`. Only ever an INSERT, matching the append-only rule above.
+
 ---
 
 ## 2. The gating state machine
