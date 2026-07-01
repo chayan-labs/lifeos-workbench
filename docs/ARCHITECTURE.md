@@ -108,6 +108,15 @@ It uses `@libsql/client/web` (HTTP transport - Workers have no filesystem or raw
 It **holds no provider tokens**: outward provider calls are deferred to the Mac/Nango after approval; the Worker's only integration duty is hosting OAuth callbacks (or Nango hosts them).
 Works with the laptop off. Compute is free; Haiku tokens are minimal.
 
+**Implemented (issue #63):** `worker/` is the Cloudflare Worker project - `src/bot.ts`
+defines the grammY `Bot` (currently just `/start` and `/health`, tested offline via
+grammY's documented `botInfo` + `api.config.use` interception pattern, no network needed in
+CI), `src/index.ts` is the Worker `fetch` handler routing `POST /telegram` through
+`webhookCallback(bot, "cloudflare-mod")` and `GET /` as a bare liveness check. No DB access,
+capture/query commands, or approve/deny keyboards yet - those are #64-67. Deploying for
+real (Cloudflare account + a live Telegram bot token from @BotFather) is a manual step; see
+`docs/MANUAL-SETUP.md` #63.
+
 ### 3.2 Heavy brain (Mac)
 
 The existing Claude Code harness does deep work: study authoring, coding, trade analysis, the self-extension builder, integration-heavy design/marketing work, media ingestion, agent pipelines, and the Eval/Release loop.

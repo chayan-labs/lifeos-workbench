@@ -246,6 +246,43 @@ commit, `.gitmodules`). Bringing up a real browser session needs you:
    confirm no `secret_enc` field and no raw cookie value shows up in
    `/api/connections`.
 
+### #63 - Deploy the Telegram bot Worker (`worker/`)
+
+The grammY bot + Cloudflare Worker scaffold (`worker/src/bot.ts`, `worker/src/index.ts`,
+`worker/wrangler.toml`) is committed and passes `npm test`/`npm run typecheck`/
+`wrangler deploy --dry-run` locally - it only needs your Cloudflare account and a real
+Telegram bot token to actually go live:
+
+1. **Create the Telegram bot**: message
+   [@BotFather](https://t.me/BotFather) → `/newbot` → note the token it gives you.
+
+2. **Authenticate wrangler** (from `worker/`):
+   ```sh
+   npx wrangler login   # or export CLOUDFLARE_API_TOKEN
+   ```
+
+3. **Set the bot token as a Worker secret** (never committed - `wrangler.toml` only
+   documents the name):
+   ```sh
+   npx wrangler secret put BOT_TOKEN
+   ```
+
+4. **Deploy**:
+   ```sh
+   npm run deploy
+   ```
+   note the `https://<subdomain>.workers.dev` URL wrangler prints.
+
+5. **Register the webhook** so Telegram forwards updates to the deployed Worker:
+   ```sh
+   curl "https://api.telegram.org/bot$BOT_TOKEN/setWebhook?url=https://<subdomain>.workers.dev/telegram"
+   ```
+
+6. **Smoke test**: message the bot `/start` and `/health` from Telegram - it should reply
+   "Life OS bot is online." and "ok" respectively. This is the only part of #63's acceptance
+   criteria ("bot responds to a message on the deployed Worker") that needs a live deploy;
+   everything else is covered by `worker/test/*.test.ts`.
+
 **:warning: Read this before running any `act` you approve:** the browser
 actuator can do anything a logged-in you can on the sites it has a captured
 session for - it is `docs/SECURITY.md` §4's most powerful and most dangerous
