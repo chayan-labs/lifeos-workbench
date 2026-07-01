@@ -69,6 +69,15 @@ Codegen and untrusted manifests run under three layers ([SELF-EXTENSION.md](./SE
 3. macOS Seatbelt sandbox (`failIfUnavailable:true`) confining Bash; credential files/env denied.
 Plus: only `modules/` is writable (never `core/`); every install is a git commit (one `git revert` away); marketplace manifests are signature-verified and re-validated locally.
 
+**Implemented (issue #72):** `server/scaffold.js` + `server/lib/{preToolUseHook,sandbox,
+worktree}.js` build layers 1-3 above and the worktree/commit-as-install plumbing, driving a
+real `query()` from `@anthropic-ai/claude-agent-sdk`. `server/test/preToolUseHook.test.js`
+proves layer 2's "confines writes to `modules/<id>/`, holds under bypass" guarantee directly
+(prefix-match traps, path traversal, and absolute-path escapes all denied) without needing
+the SDK. The two validators this section's last sentence implies ("every install is a git
+commit") still gate on are not wired in yet - `docs/SELF-EXTENSION.md`'s #72 note has the
+full real-vs-deferred breakdown.
+
 ---
 
 ## 4. Browser actuator containment

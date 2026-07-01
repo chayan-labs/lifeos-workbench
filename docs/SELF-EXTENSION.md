@@ -58,6 +58,31 @@ Enable the built-in macOS Seatbelt sandbox so any shell child is physically conf
 ```
 In a linked git worktree the sandbox auto-allows the shared `.git` so `git commit` works, while denying `.git/hooks` and `.git/config`. `failIfUnavailable:true` makes the build refuse to run if Seatbelt can't init. Note: built-in Read/Edit/Write bypass the sandbox - that is why Layer B's hook is required; the sandbox only confines Bash.
 
+**Implemented (issue #72):** `server/scaffold.js` + `server/lib/{preToolUseHook,sandbox,
+worktree,slugify}.js` - all three layers verbatim from this section, wired into a real
+`query()` call from `@anthropic-ai/claude-agent-sdk` (confirmed against the installed
+package's `sdk.d.ts`, not just this doc). Deliberately deferred to later issues, so this
+file doesn't build more than #72's own checklist:
+- **Module id selection** - `server/lib/slugify.js` is a naive placeholder (lowercase,
+  non-alnum → `_`). Layer B's hook needs a concrete target directory *before* `query()`
+  runs, so something outside the LLM call has to pick the id first; #73's structured output
+  (§3) can replace this call without touching the hook/sandbox/worktree code.
+- **The two validators (§4, #74/#75)** are not called. `server/validators/structural.js`
+  and `render.js` predate this issue and are fakes (a `content.includes('id:')`-style
+  check and an unconditional `return true`, respectively, left over from an earlier
+  prototype commit) - `scaffold.js` does not import them, since calling a fake validator
+  would give false confidence rather than none. Gating the merge on real validators is
+  #74/#75's job.
+- **No live end-to-end run.** A real Agent SDK call needs a live `ANTHROPIC_API_KEY`, costs
+  tokens, and (on success) merges a git commit into `main` - too high a blast radius to run
+  unprompted in an assistant session. `server/test/scaffold.test.js` exercises the full
+  pipeline (worktree create → agent → commit-and-merge → cleanup, and the escape-attempt /
+  SDK-error abort paths) against a disposable scratch git repo with an injected mock
+  `queryFn`; `server/test/preToolUseHook.test.js` proves Layer B's "escape attempts fail
+  closed" guarantee directly, independent of whether a real LLM call ever ran. An actual
+  `node server/scaffold.js` run against this repo is a manual follow-up, same as every other
+  "verified live post-deployment" gate in this repo (`/telegram`, Nango, Kite, WhatsApp).
+
 ---
 
 ## 3. Structured output - schema-validated manifest with auto-retry
