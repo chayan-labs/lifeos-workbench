@@ -136,6 +136,16 @@ Seeded from a git scan of the ~27 repos in `04_Projects`.
 - **Tools:** `gmail.sync|read|search` (free), `gmail.draft`, `gmail.send` 🔒.
 - **AI:** triage (label + summarize + suggest action), draft replies; send gated.
 
+**Implemented (issue #56):** `POST /api/gmail/sync` (free) materializes Gmail messages as `email`/`email_thread`
+entities, idempotently (`services/lifeos-api/src/routes/gmail.rs`). The triage board's now/later/done columns are
+driven by the entity's top-level `status` column (not `attrs`) - `GenericBoard`'s drag-to-move only PATCHes
+top-level fields, so triage state has to live there to persist. The live SPA's Email module
+(`frontend/src/lib/moduleManifests.js::EMAIL_MANIFEST`, routed at `/m/email`) renders inbox/triage/threads through
+the generic renderer system with zero bespoke view code, plus a generic "Sync inbox" action
+(`ModuleManifestPage.jsx`'s `manifest.sync`, reusable by Calendar/Notion/Slack later). `email.sent` stays gated
+through the existing `/api/gmail/send` draft-only path (#53) - not duplicated here. `contact`/`mail_label`
+materialization and reply-drafting are deferred; the triage board (the acceptance criterion) works end to end.
+
 ### 3.2 Calendar (Google Calendar, owned)
 - **Entity types:** `calendar`, `calendar_event`.
 - **attrs:** event → `{title, start, end, attendees[], location, recurrence, source_uid}`.

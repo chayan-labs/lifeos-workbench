@@ -333,6 +333,45 @@ export const DESIGN_MANIFEST = {
   ],
 };
 
+// Reads (`gmail.sync|read|search`) are unconditionally free; `gmail.send`
+// stays gated through the same draft.create -> human-approve path every
+// other outward write uses (services/lifeos-api/src/routes/gmail.rs) - this
+// manifest declares a `sync` action (materializes entities via
+// POST /api/gmail/sync) but no send/publish tool of its own.
+export const EMAIL_MANIFEST = {
+  id: 'email',
+  name: 'Email',
+  icon: '📧',
+  sync: { label: 'Sync inbox', path: '/api/gmail/sync' },
+  entityTypes: {
+    email_thread: {
+      label: 'Thread',
+      plural: 'Threads',
+      display: { title: 'title' },
+    },
+    email: {
+      label: 'Email',
+      plural: 'Emails',
+      display: { title: 'title', subtitle: (e) => e.attrs?.from, badge: (e) => e.attrs?.unread ? 'unread' : null },
+    },
+    contact: {
+      label: 'Contact',
+      plural: 'Contacts',
+      display: { title: 'title', subtitle: (e) => e.attrs?.email },
+    },
+    mail_label: {
+      label: 'Label',
+      plural: 'Labels',
+      display: { title: 'title' },
+    },
+  },
+  views: [
+    { id: 'inbox', label: 'Inbox', kind: 'list', type: 'email' },
+    { id: 'triage', label: 'Triage', kind: 'board', type: 'email', groupBy: 'status', columns: ['now', 'later', 'done'] },
+    { id: 'threads', label: 'Threads', kind: 'list', type: 'email_thread' },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -341,6 +380,7 @@ export const MODULE_MANIFESTS = {
   social: SOCIAL_MANIFEST,
   marketing: MARKETING_MANIFEST,
   design: DESIGN_MANIFEST,
+  email: EMAIL_MANIFEST,
 };
 
 export function getManifest(id) {

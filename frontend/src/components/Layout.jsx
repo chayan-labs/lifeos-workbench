@@ -27,7 +27,8 @@ import {
   GitBranch,
   Sparkles,
   History,
-  Gauge
+  Gauge,
+  Mail
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -111,6 +112,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Social', href: '/m/social', icon: Sparkles },
         { name: 'Marketing', href: '/m/marketing', icon: LayoutDashboard },
         { name: 'Design', href: '/m/design', icon: Boxes },
+        { name: 'Email', href: '/m/email', icon: Mail },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { RefreshCw, Loader2 } from 'lucide-react';
 import { apiCall } from '../lib/api';
 import GenericList from './renderers/GenericList';
 import GenericTable from './renderers/GenericTable';
@@ -38,6 +39,9 @@ export default function ModuleManifestPage({ manifest }) {
   const [events, setEvents] = useState([]);
   const [state, setState] = useState('loading');
   const [selectedId, setSelectedId] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const view = manifest.views.find((v) => v.id === activeViewId) || manifest.views[0];
   const entityType = manifest.entityTypes[view?.type] || {};
@@ -63,7 +67,23 @@ export default function ModuleManifestPage({ manifest }) {
         setEntities(ok ? data || [] : []);
         setState('ready');
       });
-  }, [manifest.id, view?.type, view?.kind]);
+  }, [manifest.id, view?.type, view?.kind, reloadKey]);
+
+  const runSync = async () => {
+    if (!manifest.sync) return;
+    setSyncing(true);
+    setSyncResult(null);
+    const { ok, data, error, status } = await apiCall('POST', manifest.sync.path, {});
+    setSyncing(false);
+    setSyncResult(
+      ok
+        ? `Synced ${data?.synced ?? 0} new (${data?.skipped ?? 0} already up to date).`
+        : status === 501
+          ? 'Not configured yet - see docs/MANUAL-SETUP.md.'
+          : error || 'Sync failed.'
+    );
+    if (ok) setReloadKey((k) => k + 1);
+  };
 
   const Renderer = KIND_RENDERERS[view?.kind] || GenericList;
   const viewEntities = applyFilter(entities, view?.filter);
@@ -71,13 +91,28 @@ export default function ModuleManifestPage({ manifest }) {
   return (
     <div className="flex flex-col gap-6">
       <div className="neo-surface neo-border-thick neo-shadow p-6 bg-neo-surface">
-        <h2 className="neo-title-md mb-1 flex items-center gap-2">
-          <span>{manifest.icon}</span> {manifest.name}
-        </h2>
-        <p className="neo-body-md text-neo-text-muted">
-          {Object.values(manifest.entityTypes).length} entity types, {manifest.views.length} views - rendered entirely
-          through the generic renderer system, no bespoke UI code per module.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="neo-title-md mb-1 flex items-center gap-2">
+              <span>{manifest.icon}</span> {manifest.name}
+            </h2>
+            <p className="neo-body-md text-neo-text-muted">
+              {Object.values(manifest.entityTypes).length} entity types, {manifest.views.length} views - rendered entirely
+              through the generic renderer system, no bespoke UI code per module.
+            </p>
+          </div>
+          {manifest.sync && (
+            <button
+              onClick={runSync}
+              disabled={syncing}
+              className="neo-btn py-1.5 px-3 bg-neo-yellow text-xs font-bold flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+            >
+              {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {syncing ? 'Syncing…' : manifest.sync.label}
+            </button>
+          )}
+        </div>
+        {syncResult && <p className="text-xs text-neo-text-muted font-mono mt-2">{syncResult}</p>}
       </div>
 
       <div className="flex gap-2 flex-wrap">

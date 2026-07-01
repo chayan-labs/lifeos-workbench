@@ -74,6 +74,8 @@ pub fn router(state: AppState) -> Router {
         //     straight through, writes only ever draft (docs/SECURITY.md §2) ---
         .route("/api/gmail/list", get(gmail::list))
         .route("/api/gmail/send", post(gmail::send))
+        // --- Email module: materialize Gmail messages as entities (issue #56) ---
+        .route("/api/gmail/sync", post(gmail::sync))
         .route("/api/calendar/list", get(calendar::list))
         .route("/api/calendar/create", post(calendar::create))
         .route("/api/drive/list", get(drive::list))
