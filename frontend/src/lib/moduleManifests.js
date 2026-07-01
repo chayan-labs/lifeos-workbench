@@ -526,6 +526,52 @@ export const READING_MANIFEST = {
   ],
 };
 
+// `travel.book` (actually purchasing a flight/hotel) is gated the same way
+// as every other outward write (services/lifeos-api/src/routes/travel.rs) -
+// this manifest declares no book/purchase tool of its own. Trip/leg/place
+// are plain user-authored entities (no external provider to sync from), so
+// unlike Email/Calendar/Files/Notion/Slack there is no bulk-sync button for
+// them; the one manifest-level action Travel has is deriving `booking`
+// entities from already-synced email via the shared sync-button mechanism.
+export const TRAVEL_MANIFEST = {
+  id: 'travel',
+  name: 'Travel',
+  icon: '✈️',
+  sync: { label: 'Parse confirmation emails', path: '/api/travel/parse-emails' },
+  entityTypes: {
+    trip: {
+      label: 'Trip',
+      plural: 'Trips',
+      display: { title: 'title', subtitle: (e) => `${e.attrs?.start || '?'} → ${e.attrs?.end || '?'}`, badge: 'status' },
+    },
+    leg: {
+      label: 'Leg',
+      plural: 'Legs',
+      display: { title: 'title', subtitle: (e) => e.attrs?.kind, badge: (e) => e.attrs?.start?.slice(0, 10) },
+    },
+    booking: {
+      label: 'Booking',
+      plural: 'Bookings',
+      display: { title: (e) => e.attrs?.provider || 'Booking', subtitle: (e) => e.attrs?.confirmation, badge: (e) => e.attrs?.cost },
+    },
+    place: {
+      label: 'Place',
+      plural: 'Places',
+      display: { title: 'title', subtitle: (e) => e.attrs?.category },
+    },
+  },
+  views: [
+    { id: 'trips', label: 'Trips', kind: 'list', type: 'trip' },
+    { id: 'timeline', label: 'Timeline', kind: 'timeline', type: 'leg', dateField: 'start' },
+    { id: 'map', label: 'Map', kind: 'map', type: 'place', latField: 'lat', lngField: 'lng' },
+    { id: 'bookings', label: 'Bookings', kind: 'table', type: 'booking', columns: [
+      { key: 'provider', label: 'Provider' },
+      { key: 'confirmation', label: 'Confirmation' },
+      { key: 'cost', label: 'Cost' },
+    ] },
+  ],
+};
+
 export const MODULE_MANIFESTS = {
   learning: LEARNING_MANIFEST,
   tasks: TASKS_MANIFEST,
@@ -540,6 +586,7 @@ export const MODULE_MANIFESTS = {
   notion: NOTION_MANIFEST,
   slack: SLACK_MANIFEST,
   reading: READING_MANIFEST,
+  travel: TRAVEL_MANIFEST,
 };
 
 export function getManifest(id) {

@@ -33,7 +33,8 @@ import {
   FolderOpen,
   StickyNote,
   MessageSquare,
-  BookOpen
+  BookOpen,
+  Plane
 } from 'lucide-react';
 
 export default function Layout({ children, onLogout }) {
@@ -123,6 +124,7 @@ export default function Layout({ children, onLogout }) {
         { name: 'Notion', href: '/m/notion', icon: StickyNote },
         { name: 'Slack', href: '/m/slack', icon: MessageSquare },
         { name: 'Reading', href: '/m/reading', icon: BookOpen },
+        { name: 'Travel', href: '/m/travel', icon: Plane },
         { name: 'Modules', href: '/modules', icon: Cpu },
         { name: 'Database', href: '/database', icon: Database },
         { name: 'Graph', href: '/graph', icon: GitBranch },

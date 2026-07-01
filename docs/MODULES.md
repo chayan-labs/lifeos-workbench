@@ -259,6 +259,25 @@ Readability-quality parsing, `read_note`, the `article ─cites→ article` edge
 - **Views:** timeline (itinerary), calendar, map (place pins), table (bookings/costs).
 - **Tools:** `travel.plan` (AI drafts itinerary from constraints), parse confirmation emails (Email module → auto-create bookings). Flight/hotel *booking* = 🔒 browser actuator.
 
+**Implemented (issue #62):** `trip`/`leg`/`place` are plain user-authored entities - created through the generic
+`POST /api/entity` like Trading/Social/Marketing, with no bespoke route file (`services/lifeos-api/src/routes/travel.rs`
+holds only the two genuinely special actions below). `POST /api/travel/parse-emails` is free: it scans
+already-synced `email` entities (issue #56) for booking-shaped subject/snippet text via a naive, deterministic
+keyword match (`flight`, `itinerary`, `confirmation`, `reservation`, `hotel`, `booking`, `e-ticket`, `boarding pass`
+- real AI-driven extraction deferred, same "real but simple" precedent as #61's `naive_summary`), and idempotently
+derives a `booking` entity per matching email (id keyed on a BLAKE3 hash of the email's own id), pulling out a
+best-guess confirmation code with a similarly naive alphanumeric-token heuristic. `POST /api/travel/book` is gated
+the same way as every other outward write in this repo: it only ever creates a `pending_approval` draft via
+`integrations::draft_action`, which has no reference to `state.browser` at all - there is no code path from a
+booking request to an actual purchase. The live SPA's Travel module (`frontend/src/lib/moduleManifests.js::TRAVEL_MANIFEST`,
+routed at `/m/travel`) reuses the `GenericTimeline`/`GenericMap` renderers first built in #27 (only just wired into
+`ModuleManifestPage.jsx`'s `KIND_RENDERERS` here) for the Timeline (legs) and Map (places, via Leaflet/OpenStreetMap,
+no API key needed) views, plus the shared sync-button mechanism for "Parse confirmation emails" since trips/legs/
+places have no external inbox of their own. Deferred: real flight/hotel search+purchase execution (the
+approve→execute queue doesn't exist anywhere in this repo yet, same Bot-phase boundary as every prior gated-write
+module), the `leg ─relates_to→ calendar_event` / `booking ─uses_asset→ file` / `place ─derived_from→ article` edges,
+AI-driven `travel.plan` itinerary drafting, and the `itinerary.changed` event.
+
 ---
 
 ## 4. Future domains

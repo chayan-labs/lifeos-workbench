@@ -22,6 +22,7 @@ mod edge;
 mod search;
 mod slack;
 mod stream;
+mod travel;
 mod whatsapp;
 mod workspace;
 
@@ -107,6 +108,9 @@ pub fn router(state: AppState) -> Router {
         // --- Reading module: save/parse articles, capture highlights (issue #61) ---
         .route("/api/reading/save", post(reading::save))
         .route("/api/reading/highlight", post(reading::highlight))
+        // --- Travel module: gated booking, free confirmation-email parsing (issue #62) ---
+        .route("/api/travel/book", post(travel::book))
+        .route("/api/travel/parse-emails", post(travel::parse_emails))
         // --- SSE: module lifecycle events for hot-reload tabs (no polling) ---
         .route("/api/stream/modules", get(stream::modules))
         // --- local agent router (OpenDesign-style) ---
