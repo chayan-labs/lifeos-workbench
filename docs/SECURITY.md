@@ -84,6 +84,14 @@ a schema-valid manifest - `server/lib/moduleManifest.js`'s Zod `ModuleManifest` 
 disagrees with the sandboxed directory) aborts the build before anything is committed, the
 same fail-closed path as a Layer B hook denial. See `docs/SELF-EXTENSION.md` §3's note.
 
+**Implemented (issue #74):** Validator 1 (§4) now runs for real - `server/validators/
+structural.js` re-loads the file the agent actually wrote (via `vm.createContext`, no
+filesystem/network globals exposed) and ajv-checks it, plus dup-type-id and dangling-view-
+ref cross-checks. `scaffold.js` calls it before `commitAndMerge`; a failure aborts and
+discards the worktree, same as a hook denial or a bad structured-output manifest. See
+`docs/SELF-EXTENSION.md` §4's note for the full breakdown and a genuine pre-existing
+inconsistency it found in `modules/learning`.
+
 ---
 
 ## 4. Browser actuator containment

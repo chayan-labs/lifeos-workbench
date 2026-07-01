@@ -11,13 +11,10 @@
 //
 // Deliberately NOT wired in here (separate issue, matches this project's
 // incremental pattern - e.g. #66 enqueueing a job before a drain existed):
-// - The two real validators (§4, issues #74/#75) - `server/validators/
-//   structural.js`/`render.js` are still fakes (string-includes checks / an
-//   unconditional `return true`) left over from an earlier prototype commit;
-//   calling them here would just give false confidence, so this file does
-//   not import them. Gating the merge on real validators is #74/#75's job.
-//   Validator 1 (#74) is expected to consume the manifest this file now
-//   returns on success, without re-parsing module.js.
+// - Validator 2, render smoke (§4, issue #75) - `server/validators/render.js`
+//   is still a fake (unconditional `return true`) left over from an earlier
+//   prototype commit; calling it here would just give false confidence, so
+//   this file does not import it. Gating the merge on it is #75's job.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { query as defaultQuery } from "@anthropic-ai/claude-agent-sdk";
@@ -26,6 +23,7 @@ import { buildSandboxConfig } from "./lib/sandbox.js";
 import { createPreToolUseHook } from "./lib/preToolUseHook.js";
 import { slugify } from "./lib/slugify.js";
 import { commitAndMerge, createWorktree, removeWorktree } from "./lib/worktree.js";
+import { validateStructural } from "./validators/structural.js";
 
 const DEFAULT_REPO_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -121,6 +119,18 @@ export async function scaffoldModule(prompt, workspaceId, opts = {}) {
     };
 
     const manifest = await runAgent(queryFn, buildPrompt(prompt, moduleId), options, hookState, moduleId);
+
+    // Validator 1 (§4, issue #74) - re-loads the file the agent actually
+    // wrote (not the structured-output summary) and checks it against
+    // module.schema.json, plus dup-type-id and dangling-view-ref checks
+    // against the worktree's full modules/ tree (a worktree checkout already
+    // contains every sibling module, so no separate lookup is needed).
+    const structural = await validateStructural(path.join(targetModuleDir, "module.js"), {
+      modulesDir: path.join(worktreePath, "modules"),
+    });
+    if (!structural.valid) {
+      throw new Error(`Structural validation failed: ${structural.errors.join("; ")}`);
+    }
 
     await commitAndMerge(repoRoot, worktreePath, branch, moduleId);
     await removeWorktree(repoRoot, worktreePath, branch);

@@ -124,6 +124,33 @@ return value, ready for Validator 1 (#74) to consume without re-reading `module.
 - Assert: schema-valid; no duplicate `type` ids across existing modules (query the registry); every `view.type` / ref resolves to a known core renderer; every `botCommand`/`agentTool` id unique.
 - Fail → discard the worktree.
 
+**Implemented (issue #74):** `server/lib/loadManifest.js` runs `module.js` in a fresh
+`vm.createContext` that only exposes a capturing `osRegisterModule` stub - real file-system/
+network globals aren't in scope, so a malformed or even hostile `module.js` can't do
+anything but populate the captured object (or throw, which is caught and reported, not
+crashed on). `server/validators/module.schema.json` + `server/validators/structural.js`
+(rewritten - the earlier version was a `content.includes('id:')`-style stub left over from
+an earlier prototype commit) run that captured object through ajv (`ajv`'s 2020-12 draft
+build), then two checks ajv alone can't express: **duplicate entity-type ids** against every
+sibling directory under `modules/` (skipping `_template` and the module's own directory,
+matched by directory name - not by the manifest's own `id` field, which is exactly the field
+under test) and **dangling view refs** (`view.type` must be a declared `entityTypes` key,
+`view.kind` must be one of the core renderers `ModuleManifestPage.jsx` actually mounts -
+`list/table/board/calendar/gallery/timeline/map/metric` - and a `metric`-kind view's
+`view.metric` must resolve in `manifest.metrics`). A third check, not in the issue's literal
+checklist but a natural corollary of "no duplicate type ids" using the same directory-name
+signal: **the manifest's own `id` must equal its directory name** - without it, a mismatched
+`id` silently can't be excluded from its own dup-check pass. `agentTool`/`botCommand` id
+uniqueness (this section's last clause) is not yet asserted - out of #74's own checklist,
+left for a follow-up alongside real cross-module registry queries.
+`scaffold.js` now calls this validator on the file the agent actually wrote (not the §3
+structured-output summary) before `commitAndMerge` - a structural failure aborts the build
+exactly like a Layer B hook denial, discarding the worktree with nothing merged to `main`.
+Spot-checked against all 14 real `modules/*/module.js` files: 13 pass; `modules/learning`
+correctly fails on a genuine pre-existing `kind: "graph"` view (no `GenericGraph` renderer
+exists in `frontend/src/core/renderers/`) - fixing that module is out of this issue's scope,
+noted here as a known finding.
+
 **Validator 2 - render smoke (headless Playwright):**
 - Boot the app against a **scratch derived/replica DB** (never canonical `lifeos.db`), on an **ephemeral port**.
 - Mount the new tile; assert **0 console/page JS errors** for the full session (`page.on('console'|'pageerror')`); assert each declared view mounts a node; assert an app-emitted **`module-mounted:<id>`** ready event (not arbitrary timeouts).

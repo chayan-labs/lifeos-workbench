@@ -50,11 +50,32 @@ const VALID_MANIFEST = {
   agentTools: [{ name: "reading_list.add", gated: false }],
 };
 
-// A benign mock agent that never touches the hook - the copy-the-template
-// step in scaffold.js already seeds modules/<id>/module.js before the agent
-// runs, so a well-behaved query() just needs to report success with a
-// schema-valid structured_output manifest (issue #73).
-async function* benignQuery() {
+const VALID_MODULE_SOURCE = `osRegisterModule({
+  id: "add_a_reading_list_module",
+  name: "Reading List",
+  icon: "BookOpen",
+  color: "var(--neo-yellow)",
+  entityTypes: {
+    item: {
+      label: "Item",
+      plural: "Items",
+      icon: "FileText",
+      attrs: { name: { type: "text", required: true } },
+    },
+  },
+  views: [{ id: "all", label: "All Items", kind: "list", type: "item" }],
+  botCommands: [{ cmd: "add", help: "Add a reading list item", handler: "handleAdd" }],
+  agentTools: [{ name: "reading_list.add", schema: {}, impl: "handleAdd", gated: false }],
+});
+`;
+
+// A benign mock agent that behaves like a well-behaved real one: it edits
+// modules/<id>/module.js (seeded from _template by scaffold.js's own copy
+// step) to satisfy the request, then reports success with a schema-valid
+// structured_output manifest (issue #73) - which Validator 1 (#74) then
+// re-loads and checks against the file the "agent" actually wrote.
+async function* benignQuery(params) {
+  await fs.writeFile(path.join(params.options.cwd, "modules", "add_a_reading_list_module", "module.js"), VALID_MODULE_SOURCE, "utf8");
   yield { type: "result", subtype: "success", is_error: false, structured_output: VALID_MANIFEST };
 }
 
@@ -62,7 +83,7 @@ describe("scaffoldModule - happy path", () => {
   it("commits the scaffolded module to main and cleans up the worktree", async () => {
     const result = await scaffoldModule("add a reading list module", "ws_test", {
       repoRoot,
-      queryFn: () => benignQuery(),
+      queryFn: (params) => benignQuery(params),
     });
 
     expect(result).toEqual({
@@ -126,6 +147,50 @@ describe("scaffoldModule - structured output validation", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/did not complete successfully/);
+  });
+});
+
+describe("scaffoldModule - structural validation (issue #74)", () => {
+  it("aborts and merges nothing when the written module.js is structurally invalid", async () => {
+    const brokenSource = VALID_MODULE_SOURCE.replace('type: "item"', 'type: "nonexistent"');
+    async function* brokenQuery(params) {
+      await fs.writeFile(path.join(params.options.cwd, "modules", "add_a_reading_list_module", "module.js"), brokenSource, "utf8");
+      yield { type: "result", subtype: "success", is_error: false, structured_output: VALID_MANIFEST };
+    }
+
+    const { stdout: before } = await git(["log", "--oneline", "main"]);
+
+    const result = await scaffoldModule("add a reading list module", "ws_test", {
+      repoRoot,
+      queryFn: (params) => brokenQuery(params),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Structural validation failed/);
+    expect(result.error).toMatch(/nonexistent/);
+
+    const { stdout: after } = await git(["log", "--oneline", "main"]);
+    expect(after).toBe(before);
+
+    const { stdout: worktrees } = await git(["worktree", "list"]);
+    expect(worktrees.split("\n").filter(Boolean)).toHaveLength(1);
+  });
+
+  it("aborts when the agent leaves module.js unedited (id still the template placeholder)", async () => {
+    // A no-op "agent" that reports success without ever touching the
+    // seeded file - structural validation must still catch the id/dirname
+    // mismatch even though structured output and the hook both look fine.
+    async function* noopQuery() {
+      yield { type: "result", subtype: "success", is_error: false, structured_output: VALID_MANIFEST };
+    }
+
+    const result = await scaffoldModule("add a reading list module", "ws_test", {
+      repoRoot,
+      queryFn: () => noopQuery(),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/does not match its own directory/);
   });
 });
 
