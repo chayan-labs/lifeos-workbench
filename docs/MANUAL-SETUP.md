@@ -496,3 +496,20 @@ binary fixture files. One true end-to-end check once both env vars are set: comm
 `lifeos-drain`, confirm a caption `segment` and (if the image has visible text) an OCR `segment`
 appear via `GET /api/entity?type=segment`. For a PDF, confirm each non-empty page becomes its
 own `segment` with `attrs.page` matching the real page number.
+
+### #92 - `lifeos-pipelines` agent DAG orchestrator reuses `ANTHROPIC_API_KEY`
+
+`services/lifeos-pipelines` needs no new env var - it reuses the same
+`ANTHROPIC_API_KEY` `#90`'s `HaikuCaptioner` already reads (see above), now
+also consumed by `runner::HaikuStageRunner` in `services/lifeos-drain/src/
+main.rs`. Without it set, `lifeos-drain` uses a `NoopStageRunner` that fails
+`pipeline` jobs loudly on their first stage (a pipeline stage is not
+optional, same reasoning as `LIFEOS_WHISPER_MODEL`/image captioning above).
+
+One true end-to-end check once the key is set: `POST /api/pipeline/run
+{"pipeline": "post-from-topic"}`, confirm a `jobs` row with `kind='pipeline'`
+appears, run `lifeos-drain`, confirm `GET /api/event?run_id=<job_id>` shows
+one `pipeline.stage.completed` event per stage up through `verify`, then a
+final `pipeline.stage.gated` event (`gated=1`) and a `pending_approval`
+entity for `publish` - the run always halts there, it never calls a real
+social-post provider.

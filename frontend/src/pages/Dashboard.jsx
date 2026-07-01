@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Database,
@@ -39,13 +39,23 @@ export default function Dashboard() {
     });
     return () => { cancelled = true; };
   }, []);
+  // Stage order/labels match the real `post-from-topic` pipeline registered
+  // in `services/lifeos-pipelines/src/lib.rs::pipeline_registry` (issue #92):
+  // research(memvec.recall) -> draft(copywriting) -> verify(eval-gate) ->
+  // publish(social.draft, gated).
+  const PIPELINE_STAGE_ORDER = ['research', 'draft', 'verify', 'publish'];
+  const PIPELINE_STAGE_META = {
+    research: { label: '1. memvec.recall', icon: Database },
+    draft: { label: '2. copywriting', icon: Terminal },
+    verify: { label: '3. eval-gate', icon: ShieldCheck },
+    publish: { label: '4. social.draft (Gated)', icon: Zap },
+  };
+  const idlePipelineLogs = () =>
+    PIPELINE_STAGE_ORDER.map((stage) => ({ stage, ...PIPELINE_STAGE_META[stage], status: 'idle' }));
+
   const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [pipelineLogs, setPipelineLogs] = useState([
-    { stage: '1. memvec.recall', status: 'idle', icon: Database },
-    { stage: '2. copywriting', status: 'idle', icon: Terminal },
-    { stage: '3. eval-gate', status: 'idle', icon: ShieldCheck },
-    { stage: '4. social.draft (Gated)', status: 'idle', icon: Zap }
-  ]);
+  const [pipelineLogs, setPipelineLogs] = useState(idlePipelineLogs());
+  const [pipelineRunState, setPipelineRunState] = useState(null); // null | 'completed' | 'failed' | 'awaiting_approval' | 'gated'
 
   const [actions, setActions] = useState([
     { id: 1, trigger: 'asset.version_created', action: 'draft social post', active: true },
@@ -53,42 +63,71 @@ export default function Dashboard() {
     { id: 3, trigger: 'design_file.updated', action: 'run figma-implement-design', active: false }
   ]);
 
-  const runPipelineDemo = () => {
+  const pipelinePollRef = useRef(null);
+  const PIPELINE_POLL_MS = 2000;
+
+  useEffect(() => () => clearInterval(pipelinePollRef.current), []);
+
+  // Real POST /api/pipeline/run (issue #92) + polling GET /api/event?run_id=
+  // for the job's per-stage events, replacing the old setTimeout-staged demo.
+  const runPipelineDemo = async () => {
+    clearInterval(pipelinePollRef.current);
     setPipelineRunning(true);
-    setPipelineLogs([
-      { stage: '1. memvec.recall', status: 'running', icon: Database },
-      { stage: '2. copywriting', status: 'idle', icon: Terminal },
-      { stage: '3. eval-gate', status: 'idle', icon: ShieldCheck },
-      { stage: '4. social.draft (Gated)', status: 'idle', icon: Zap }
-    ]);
+    setPipelineRunState(null);
+    setPipelineLogs(idlePipelineLogs());
 
-    setTimeout(() => {
-      setPipelineLogs([
-        { stage: '1. memvec.recall', status: 'done', icon: Database },
-        { stage: '2. copywriting', status: 'running', icon: Terminal },
-        { stage: '3. eval-gate', status: 'idle', icon: ShieldCheck },
-        { stage: '4. social.draft (Gated)', status: 'idle', icon: Zap }
-      ]);
-    }, 1200);
-
-    setTimeout(() => {
-      setPipelineLogs([
-        { stage: '1. memvec.recall', status: 'done', icon: Database },
-        { stage: '2. copywriting', status: 'done', icon: Terminal },
-        { stage: '3. eval-gate', status: 'running', icon: ShieldCheck },
-        { stage: '4. social.draft (Gated)', status: 'idle', icon: Zap }
-      ]);
-    }, 2400);
-
-    setTimeout(() => {
-      setPipelineLogs([
-        { stage: '1. memvec.recall', status: 'done', icon: Database },
-        { stage: '2. copywriting', status: 'done', icon: Terminal },
-        { stage: '3. eval-gate', status: 'done', icon: ShieldCheck },
-        { stage: '4. social.draft (Gated)', status: 'gated', icon: Zap }
-      ]);
+    const { ok, data, offline } = await apiCall('POST', '/api/pipeline/run', {
+      pipeline: 'post-from-topic',
+      input: {},
+    });
+    if (!ok || offline || !data?.job_id) {
       setPipelineRunning(false);
-    }, 3600);
+      setPipelineRunState('failed');
+      return;
+    }
+    const runId = data.job_id;
+
+    const poll = async () => {
+      const { ok: eventsOk, data: events, offline: eventsOffline } = await apiCall(
+        'GET',
+        `/api/event?run_id=${encodeURIComponent(runId)}`
+      );
+      if (!eventsOk || eventsOffline || !Array.isArray(events)) return;
+
+      const byTs = [...events].sort((a, b) => a.ts - b.ts);
+      const logs = idlePipelineLogs();
+      let terminal = null;
+      for (const evt of byTs) {
+        const stageIdx = PIPELINE_STAGE_ORDER.indexOf(evt.attrs?.stage);
+        if (stageIdx === -1) continue;
+        if (evt.type === 'pipeline.stage.completed') {
+          logs[stageIdx].status = 'done';
+        } else if (evt.type === 'pipeline.stage.failed') {
+          logs[stageIdx].status = 'failed';
+          terminal = 'failed';
+        } else if (evt.type === 'pipeline.stage.gated') {
+          logs[stageIdx].status = 'gated';
+          terminal = evt.outcome === 'awaiting_approval' ? 'awaiting_approval' : 'gated';
+        }
+      }
+      if (!terminal) {
+        const runningIdx = logs.findIndex((l) => l.status === 'idle');
+        if (runningIdx !== -1) {
+          logs[runningIdx].status = 'running';
+        } else {
+          terminal = 'completed';
+        }
+      }
+      setPipelineLogs(logs);
+      if (terminal) {
+        setPipelineRunState(terminal);
+        setPipelineRunning(false);
+        clearInterval(pipelinePollRef.current);
+      }
+    };
+
+    poll();
+    pipelinePollRef.current = setInterval(poll, PIPELINE_POLL_MS);
   };
 
   const toggleAction = (actionId) => {
@@ -329,7 +368,9 @@ export default function Dashboard() {
           </div>
           
           <p className="text-xs text-neo-text-muted mb-4">
-            Execute declarative pipelines configured inside module manifests. Stage actions orchestrate separate local Claude Agent SDK iterations.
+            Runs the real <code>post-from-topic</code> pipeline via <code>POST /api/pipeline/run</code>, polling per-stage
+            events from <code>lifeos-pipelines</code>. The publish stage is always gated - it drafts a <code>pending_approval</code>
+            entity and halts rather than posting.
           </p>
 
           <div className="flex flex-col gap-3">
@@ -339,12 +380,13 @@ export default function Dashboard() {
                 <div key={idx} className="p-3 bg-neo-bg neo-border flex justify-between items-center text-xs">
                   <div className="flex items-center gap-2 font-semibold">
                     <Icon size={14} className="text-neo-blue" />
-                    <span>{log.stage}</span>
+                    <span>{log.label}</span>
                   </div>
                   <span className={`text-[10px] px-2 py-0.5 border font-bold uppercase ${
                     log.status === 'done' ? 'bg-neo-mint' :
                     log.status === 'running' ? 'bg-neo-yellow animate-pulse' :
-                    log.status === 'gated' ? 'bg-neo-red text-white' : 'bg-neo-surface text-neo-text-muted'
+                    log.status === 'gated' ? 'bg-neo-red text-white' :
+                    log.status === 'failed' ? 'bg-neo-red text-white' : 'bg-neo-surface text-neo-text-muted'
                   }`}>
                     {log.status}
                   </span>
@@ -352,6 +394,12 @@ export default function Dashboard() {
               );
             })}
           </div>
+
+          {pipelineRunState && (
+            <div className="mt-3 text-[10px] font-mono text-neo-text-muted uppercase">
+              Run state: {pipelineRunState.replace('_', ' ')}
+            </div>
+          )}
         </div>
 
         {/* Life OS Actions Rules Engine */}

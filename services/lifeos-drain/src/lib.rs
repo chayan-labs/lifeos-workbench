@@ -166,13 +166,18 @@ pub enum Dispatch {
     /// `ingest` jobs have a real handler now (issue #88, `lifeos_ingest::process_ingest_job`),
     /// called directly as a library - not a subprocess, both crates share this workspace.
     Ingest,
+    /// `pipeline` jobs have a real handler now (issue #92,
+    /// `lifeos_pipelines::process_pipeline_job`), same direct-library-call
+    /// shape as `Ingest`.
+    Pipeline,
     /// Unknown kind - cannot be handled, will be failed.
     Unknown,
 }
 
-/// Route a job to its handler by kind. `ingest` is real (#88); pipeline/
-/// module_build/eval land in later phases - until then those known kinds are
-/// acknowledged as no-op stubs and unknown kinds are rejected.
+/// Route a job to its handler by kind. `ingest` (#88) and `pipeline` (#92)
+/// are real; module_build/eval land in later phases - until then those
+/// known kinds are acknowledged as no-op stubs and unknown kinds are
+/// rejected.
 ///
 /// `reconcile` (docs/DATA-MODEL.md §4.2) already has a real handler -
 /// `lifeos_api::reconcile::reconcile_entity`, reachable today via
@@ -188,7 +193,7 @@ pub enum Dispatch {
 pub fn dispatch(kind: &str) -> Dispatch {
     match kind {
         "ingest" => Dispatch::Ingest,
-        "pipeline" => Dispatch::Stub("lifeos-pipelines"),
+        "pipeline" => Dispatch::Pipeline,
         "module_build" => Dispatch::Stub("scaffold.js"),
         "eval" => Dispatch::Stub("harness eval"),
         "reconcile" => Dispatch::Stub("lifeos-api reconcile"),
@@ -739,7 +744,7 @@ mod tests {
     #[test]
     fn dispatch_routes_ingest_to_its_real_handler() {
         assert_eq!(dispatch("ingest"), Dispatch::Ingest);
-        assert_eq!(dispatch("pipeline"), Dispatch::Stub("lifeos-pipelines"));
+        assert_eq!(dispatch("pipeline"), Dispatch::Pipeline);
         assert_eq!(dispatch("nonsense"), Dispatch::Unknown);
     }
 }

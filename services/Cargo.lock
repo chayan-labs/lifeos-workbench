@@ -1892,6 +1892,7 @@ dependencies = [
  "async-trait",
  "libsql",
  "lifeos-ingest",
+ "lifeos-pipelines",
  "lifeos-vcs",
  "reqwest",
  "serde",
@@ -1926,9 +1927,13 @@ dependencies = [
 name = "lifeos-pipelines"
 version = "1.0.0"
 dependencies = [
+ "async-trait",
+ "libsql",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "ulid",
 ]
 
 [[package]]

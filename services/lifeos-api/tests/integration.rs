@@ -268,6 +268,34 @@ async fn events_are_append_only_no_mutation_routes() {
 }
 
 #[tokio::test]
+async fn events_can_be_filtered_by_run_id() {
+    // Issue #92: the frontend polls a pipeline run's stage events by job id
+    // (`run_id`) before it knows the `pipeline_run` entity id
+    // `process_pipeline_job` creates internally.
+    let app = test_app().await;
+    send(
+        &app.router,
+        "POST",
+        "/api/event",
+        Some(json!({"type": "pipeline.stage.completed", "run_id": "job_run_a"})),
+    )
+    .await;
+    send(
+        &app.router,
+        "POST",
+        "/api/event",
+        Some(json!({"type": "pipeline.stage.completed", "run_id": "job_run_b"})),
+    )
+    .await;
+
+    let (st, body) = send(&app.router, "GET", "/api/event?run_id=job_run_a", None).await;
+    assert_eq!(st, StatusCode::OK);
+    let events = body.as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["run_id"], "job_run_a");
+}
+
+#[tokio::test]
 async fn module_request_queues_a_build_job() {
     let app = test_app().await;
     let (st, body) = send(

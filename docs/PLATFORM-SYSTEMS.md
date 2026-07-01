@@ -27,6 +27,37 @@ pipelines: [{ id:'post-from-topic', stages:[
 - Outward final stages are **gated**.
 - **Build:** 🦀 Rust orchestrator (or JS if kept close to `scaffold.js`); the per-stage worker is the Agent SDK.
 
+**Implemented (issue #92):** `services/lifeos-pipelines` is the real orchestrator.
+`lifeos-drain` claims `pipeline` jobs (payload `{pipeline, input}`, same shape
+`routes/planned.rs::pipeline_run` already enqueues) and calls
+`lifeos_pipelines::process_pipeline_job` directly as a library, same pattern as
+`lifeos-ingest`. No Rust "Claude Agent SDK" crate exists anywhere in this
+workspace: the established codebase pattern (`lifeos-ingest/src/vision.rs::
+HaikuCaptioner`) is a direct `reqwest` call to the Anthropic Messages API,
+DI-trait-wrapped (`PipelineStageRunner`, `NoopStageRunner`/`HaikuStageRunner`,
+env-gated on `ANTHROPIC_API_KEY` exactly like the ingest captioner) - pipeline
+stages follow the same shape rather than pulling in an SDK dependency.
+
+`pipeline_registry()` is a hardcoded Rust table today, seeded with the one
+pipeline this doc actually specifies (`post-from-topic` above, field names
+verbatim). Manifest-driven registration - reading a module's own `pipelines:
+[...]` array - is a deferred gap: no module manifest declares one yet, so
+building the JS→Rust bridge for a single documented example would be
+speculative.
+
+Each stage writes one `events` row with the full harness run-log columns
+(`run_id` = the job id, `tier='mac'`, `model`, `tokens_in/out`, `latency_ms`,
+`outcome`). A `gate:'eval'` stage (`verify` above) runs a real but
+intentionally minimal heuristic (`eval_stage_output`) - not the full
+LLM-as-judge system in [HARNESS-LOOP.md](./HARNESS-LOOP.md) §2, which is a
+separate, larger, unbuilt system - and halts the run (`gated=1` on that
+event) if the score is below threshold. Any stage marked `gated: true`
+(`publish` above) is **unconditional**: the runner is never called for it;
+instead a `pending_approval` entity is drafted (same "only ever drafts"
+shape as `integrations.rs::draft_action`, `whatsapp.rs`, `slack.rs`,
+`drive.rs`, `travel.rs`) and the run halts at `awaiting_approval` - never
+auto-publishing.
+
 ---
 
 ## 2. Dashboards / analytics (derived from `events`)

@@ -19,9 +19,9 @@
 //! whisper.cpp model, e.g. ggml-tiny.en.bin - without it, audio ingest jobs
 //! fail loudly rather than silently producing zero segments, see #89),
 //! ANTHROPIC_API_KEY (optional - without it, image ingest jobs fail loudly,
-//! see #90), LIFEOS_TESSERACT_BIN (optional path to the `tesseract` CLI
-//! binary - without it, image ingest still captions, just without OCR text,
-//! see #90).
+//! see #90, and pipeline jobs fail loudly too, see #92), LIFEOS_TESSERACT_BIN
+//! (optional path to the `tesseract` CLI binary - without it, image ingest
+//! still captions, just without OCR text, see #90).
 
 use libsql::Builder;
 use lifeos_drain::{
@@ -33,6 +33,7 @@ use lifeos_ingest::{
     Captioner, Embedder, HaikuCaptioner, IngestJobPayload, NoopCaptioner, NoopEmbedder, NoopOcr,
     NoopTranscriber, Ocr, SubprocessEmbedder, TesseractOcr, Transcriber, WhisperTranscriber,
 };
+use lifeos_pipelines::{HaikuStageRunner, NoopStageRunner, PipelineJobPayload, PipelineStageRunner};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 
@@ -121,6 +122,14 @@ async fn main() {
         }
     };
 
+    let pipeline_runner: Box<dyn PipelineStageRunner> = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(api_key) if !api_key.is_empty() => Box::new(HaikuStageRunner { api_key }),
+        _ => {
+            println!("lifeos-drain: ANTHROPIC_API_KEY not set, pipeline jobs will fail loudly");
+            Box::new(NoopStageRunner)
+        }
+    };
+
     loop {
         match claim_job(&conn, &worker_id, now_secs(), cfg).await {
             Ok(Some(job)) => {
@@ -133,6 +142,7 @@ async fn main() {
                     transcriber.as_ref(),
                     captioner.as_ref(),
                     ocr.as_ref(),
+                    pipeline_runner.as_ref(),
                 )
                 .await
             }
@@ -166,6 +176,7 @@ async fn run_job(
     transcriber: &dyn Transcriber,
     captioner: &dyn Captioner,
     ocr: &dyn Ocr,
+    pipeline_runner: &dyn PipelineStageRunner,
 ) {
     println!("lifeos-drain: claimed {} (kind={})", job.id, job.kind);
     let result = match dispatch(&job.kind) {
@@ -194,6 +205,28 @@ async fn run_job(
                 }
                 Err(e) => {
                     eprintln!("lifeos-drain: {} ingest failed: {e} - failing", job.id);
+                    fail_job(conn, &job.id, worker_id).await
+                }
+            }
+        }
+        Dispatch::Pipeline => {
+            let payload: PipelineJobPayload = serde_json::from_str(&job.payload).unwrap_or_default();
+            match lifeos_pipelines::process_pipeline_job(
+                conn,
+                &job.workspace_id,
+                &job.id,
+                payload,
+                pipeline_runner,
+                now_secs(),
+            )
+            .await
+            {
+                Ok(outcome) => {
+                    println!("lifeos-drain: {} pipeline -> {outcome:?}", job.id);
+                    complete_job(conn, &job.id, worker_id).await
+                }
+                Err(e) => {
+                    eprintln!("lifeos-drain: {} pipeline failed: {e} - failing", job.id);
                     fail_job(conn, &job.id, worker_id).await
                 }
             }

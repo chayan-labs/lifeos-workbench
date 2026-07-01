@@ -67,7 +67,7 @@ Each row is one work item: the route, where it lands in the UI, and what to repl
 | Route | Lands in |
 | --- | --- |
 | `POST /api/ingest` | `VcsIngest.jsx`'s "Ingest Status" panel (issue #91) - file picker from `GET /api/entity?module=files&type=file`, submit, poll `GET /api/entity/:id` + `GET /api/entity?type=segment&parent_id=<id>` for status/segment count |
-| `POST /api/pipeline/run` | `Dashboard.jsx` pipeline trigger - replace the `setTimeout` animation with a real enqueue + run-status from `events` |
+| `POST /api/pipeline/run` | `Dashboard.jsx` pipeline trigger (issue #92) - real, no longer a `setTimeout` animation: triggers `post-from-topic`, then polls `GET /api/event?run_id=<job_id>` every 2s and renders each stage's real status (`idle/running/done/failed/gated`) plus the run's terminal state (`completed/failed/awaiting_approval/gated`) - the `publish` stage always ends in `awaiting_approval`, never a fake "done" |
 
 **Planned routes (honest 501) - keep declared, show a "ships in phase N" state, do not fake success:**
 `GET /api/broker/positions` (read-only; **no order route will ever exist**).

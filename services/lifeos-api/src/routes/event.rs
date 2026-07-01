@@ -106,6 +106,11 @@ pub struct ListParams {
     workspace_id: Option<String>,
     r#type: Option<String>,
     entity_id: Option<String>,
+    // Filters by the harness run-log `run_id` column (issue #92: a pipeline
+    // run's job id, so the frontend can poll all of one run's stage events
+    // before it knows the `pipeline_run` entity id `process_pipeline_job`
+    // creates internally).
+    run_id: Option<String>,
     limit: Option<u32>,
 }
 
@@ -120,7 +125,9 @@ pub async fn list(
     let mut sql = format!("SELECT {COLS_EVENT} FROM events WHERE workspace_id = ?1");
     let mut binds: Vec<String> = vec![workspace_id];
     let mut next = 2;
-    for (col, val) in [("type", &params.r#type), ("entity_id", &params.entity_id)] {
+    for (col, val) in
+        [("type", &params.r#type), ("entity_id", &params.entity_id), ("run_id", &params.run_id)]
+    {
         if let Some(v) = val {
             sql.push_str(&format!(" AND {col} = ?{next}"));
             binds.push(v.clone());
