@@ -1670,10 +1670,12 @@ version = "1.0.0"
 dependencies = [
  "blake3",
  "fastcdc",
+ "libsql",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "ulid",
  "walkdir",
 ]
 

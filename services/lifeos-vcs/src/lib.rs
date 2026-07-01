@@ -1,10 +1,12 @@
 mod blob;
 mod chunk;
+mod commit;
 mod hash;
 mod store;
 
 pub use blob::{read_blob, store_blob, BlobManifest};
 pub use chunk::{chunk_reader, ChunkRef};
+pub use commit::{commit_version, history, VersionEntry};
 pub use hash::hash_bytes;
 pub use store::ObjectStore;
 
