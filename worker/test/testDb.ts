@@ -53,6 +53,15 @@ CREATE TABLE jobs (
   attempts INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE module_requests (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 export async function createTestDb(): Promise<LocalDb> {

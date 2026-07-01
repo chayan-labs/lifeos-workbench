@@ -17,6 +17,8 @@ import {
 } from "./entities.js";
 import { sumClosedTradePnl } from "./events.js";
 import type { ApprovalResult } from "./approvals.js";
+import { enqueueJob } from "./jobs.js";
+import { enqueueModuleRequest } from "./moduleRequests.js";
 
 const SHORT_ID_LEN = 6;
 
@@ -128,4 +130,29 @@ export function formatApprovalResult(result: ApprovalResult): string {
   if (result.outcome === "already_resolved") return `Already ${result.entity.status} - no change.`;
   if (result.outcome === "approved") return "Approved - queued for execution.";
   return "Denied.";
+}
+
+// `/addmodule <prompt>` (issue #67, README.md's "Mac offline (queued)"
+// flow): writes a `module_requests` row and replies "queued" - never writes
+// code or files itself (there's no filesystem on a Cloudflare Worker to
+// write to; the real scaffold.js build only ever runs on the Mac).
+export async function requestModule(db: WorkerDb, workspaceId: string, text: string): Promise<string> {
+  const prompt = text.trim();
+  if (!prompt) return "Usage: /addmodule <what you want added>";
+
+  await enqueueModuleRequest(db, workspaceId, prompt);
+  return "Queued. The Mac will build it next time it's awake.";
+}
+
+// `/ingest <text>` (issue #67): the generic heavy-work queue for anything
+// that isn't a module build - e.g. "ingest this" media/document processing
+// (docs/MEDIA-INTELLIGENCE.md), which also only ever runs on the Mac
+// (lifeos-ingest). Distinct from `/addmodule`'s dedicated `module_requests`
+// table - this uses the general-purpose `jobs` table instead.
+export async function ingest(db: WorkerDb, workspaceId: string, text: string): Promise<string> {
+  const payload = text.trim();
+  if (!payload) return "Usage: /ingest <url or description>";
+
+  await enqueueJob(db, workspaceId, "ingest", { text: payload });
+  return "Queued for the Mac.";
 }

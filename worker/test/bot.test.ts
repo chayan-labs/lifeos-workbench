@@ -307,3 +307,25 @@ describe("createBot - gated approve/deny (issue #66)", () => {
     expect(captured.messages[0].text).toBe("Nothing pending approval.");
   });
 });
+
+describe("createBot - heavy-job enqueue (issue #67)", () => {
+  it("/addmodule replies queued and never writes code or files itself", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const sent = repliesFrom(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/addmodule add a health tracker"));
+
+    expect(sent[0]).toMatch(/^Queued/);
+  });
+
+  it("/ingest replies queued for the Mac", async () => {
+    const bot = createBot(deps, FAKE_BOT_INFO);
+    const sent = repliesFrom(bot);
+
+    await bot.init();
+    await bot.handleUpdate(textUpdate("/ingest https://example.com/clip"));
+
+    expect(sent[0]).toBe("Queued for the Mac.");
+  });
+});

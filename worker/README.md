@@ -23,11 +23,17 @@ and, later, OAuth callbacks. See `docs/ARCHITECTURE.md` §3.1 and `docs/BUILD-PL
   drain - the Worker never calls a provider directly. Tapping Deny records
   `events('${type}.rejected')` and enqueues nothing. A second tap on an already-resolved
   draft is a no-op, not a crash.
+- Issue #67: heavy-job enqueue (`src/moduleRequests.ts`, docs/ARCHITECTURE.md §5).
+  `/addmodule <prompt>` writes a `module_requests` row (`status='queued'`); `/ingest <text>`
+  writes a generic `jobs(kind='ingest')` row via the same `enqueueJob` #66's
+  `execute_approval` jobs use. Both reply "queued" and touch no filesystem - there isn't one
+  on a Worker.
 
-The real `execute_approval` job dispatch (actually calling Nango's proxy / the browser
-actuator / trade-exec) lands in #67 alongside the rest of the heavy-job enqueue path -
-`services/lifeos-drain`'s `dispatch()` doesn't recognize this job kind yet (its other kinds
-are stubs too).
+Real dispatch - `services/lifeos-drain` actually claiming and running `execute_approval`
+(#66) or `ingest` (#67) jobs, or draining `module_requests` into a real scaffold.js build -
+is not built yet; `dispatch()`'s other job kinds (`pipeline`/`module_build`/`eval`/
+`reconcile`) are stubs too. The bot side of both queues is done and tested; the drain side
+is a separate, not-yet-scoped piece of work.
 
 Every DB query in `src/entities.ts` filters by `workspace_id`, resolved server-side from
 `env.WORKSPACE_ID` (never from Telegram input) via `resolveWorkspaceId()` in `src/db.ts`.

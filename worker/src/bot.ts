@@ -1,5 +1,4 @@
-// grammY bot definition - issues #63-66. The heavy-job enqueue path (real
-// dispatch of #66's `execute_approval` jobs) lands in #67.
+// grammY bot definition - issues #63-67.
 import { Bot, InlineKeyboard } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { WorkerDb } from "@lifeos/db/client/worker";
@@ -11,9 +10,11 @@ import {
   formatApprovalResult,
   formatPendingApproval,
   inbox,
+  ingest,
   markDone,
   pnl,
   quiz,
+  requestModule,
   today,
 } from "./commands.js";
 
@@ -79,6 +80,16 @@ export function createBot(deps: BotDeps, botInfo?: UserFromGetMe): Bot {
 
   bot.command("quiz", async (ctx) => {
     await ctx.reply(await quiz(db, workspaceId));
+  });
+
+  // issue #67: heavy/Mac-only work - the bot only ever enqueues, never
+  // builds or executes anything itself.
+  bot.command("addmodule", async (ctx) => {
+    await ctx.reply(await requestModule(db, workspaceId, ctx.match));
+  });
+
+  bot.command("ingest", async (ctx) => {
+    await ctx.reply(await ingest(db, workspaceId, ctx.match));
   });
 
   // issue #66: everything awaiting a tap, one message per draft (Telegram

@@ -180,6 +180,17 @@ Everything above is free for our use; the only source-available (not pure-OSS) i
 Telegram message → Worker (grammY) → Haiku interprets → writes `entity`/`event` to Turso (scoped to workspace) → replies.
 If heavy ("ingest this video", "add a module") → writes a `jobs` row → replies "queued".
 
+**Implemented (issue #67):** `worker/src/commands.ts` - `/addmodule <prompt>` writes a
+`module_requests` row (`status='queued'`, `worker/src/moduleRequests.ts`), matching the
+dedicated table this repo already uses for the self-extension queue (`db/schema.ts`'s
+`moduleRequests`, mirrored from `migrations/0001_core.sql`), and `/ingest <text>` writes a
+generic `jobs(kind='ingest')` row (`worker/src/jobs.ts::enqueueJob`, the same helper #66's
+`execute_approval` jobs use). Both reply "queued" immediately and touch no filesystem -
+there isn't one on a Cloudflare Worker, so "the bot never writes code/files" holds
+structurally, not just by convention. Real dispatch (`lifeos-drain` claiming and running
+these) is not built yet - its `dispatch()` doesn't recognize `ingest` or drain
+`module_requests` at all, same gap #66 left for `execute_approval`.
+
 **Heavy drain on the Mac:**
 `launchd` poller (or on-wake) → `lifeos-drain` (Rust) atomically claims a `jobs` row (`UPDATE … RETURNING`) → runs the relevant Rust service or a headless Claude Agent SDK job → writes results + `events` → bot notifies.
 

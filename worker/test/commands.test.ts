@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { LocalDb } from "@lifeos/db/client/local";
-import { events } from "@lifeos/db";
-import { captureDraft, captureTask, captureTopic, inbox, markDone, pnl, quiz, today } from "../src/commands.js";
+import { events, jobs, moduleRequests } from "@lifeos/db";
+import { eq } from "@lifeos/db/query";
+import { captureDraft, captureTask, captureTopic, inbox, ingest, markDone, pnl, quiz, requestModule, today } from "../src/commands.js";
 import { listEntities } from "../src/entities.js";
 import { createTestDb } from "./testDb.js";
 
@@ -110,5 +111,37 @@ describe("quiz", () => {
 
   it("tells you to capture a topic first when there are none", async () => {
     expect(await quiz(db, WS)).toMatch(/No topics/);
+  });
+});
+
+describe("requestModule", () => {
+  it("queues a module_requests row and never touches code/files", async () => {
+    const reply = await requestModule(db, WS, "add a health tracker module");
+
+    expect(reply).toMatch(/^Queued/);
+    const rows = await db.select().from(moduleRequests).where(eq(moduleRequests.workspaceId, WS));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("queued");
+    expect(rows[0].prompt).toBe("add a health tracker module");
+  });
+
+  it("rejects an empty request", async () => {
+    expect(await requestModule(db, WS, "  ")).toMatch(/^Usage:/);
+  });
+});
+
+describe("ingest", () => {
+  it("queues a jobs row for the Mac to drain", async () => {
+    const reply = await ingest(db, WS, "https://example.com/some-video");
+
+    expect(reply).toBe("Queued for the Mac.");
+    const rows = await db.select().from(jobs).where(eq(jobs.workspaceId, WS));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("ingest");
+    expect(JSON.parse(rows[0].payload)).toEqual({ text: "https://example.com/some-video" });
+  });
+
+  it("rejects an empty ingest request", async () => {
+    expect(await ingest(db, WS, "")).toMatch(/^Usage:/);
   });
 });
