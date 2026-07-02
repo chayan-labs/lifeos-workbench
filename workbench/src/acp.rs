@@ -59,6 +59,7 @@ pub struct AcpAgent {
     next_id: AtomicI64,
     session_id: Mutex<Option<String>>,
     cwd: PathBuf,
+    mcp_servers: Vec<Value>,
     child: Option<Child>,
 }
 
@@ -72,6 +73,7 @@ impl AcpAgent {
         reader: Box<dyn Read + Send>,
         writer: Box<dyn Write + Send>,
         cwd: &Path,
+        mcp_servers: Vec<Value>,
     ) -> Self {
         let pending: Pending = Arc::default();
         let conversation: Shared = Arc::default();
@@ -96,13 +98,14 @@ impl AcpAgent {
             next_id: AtomicI64::new(1),
             session_id: Mutex::new(None),
             cwd: cwd.to_path_buf(),
+            mcp_servers,
             child: None,
         }
     }
 
     /// Spawn the configured agent (`WORKBENCH_AGENT_CMD`, default
     /// `claude-code-acp`) and run initialize + session/new.
-    pub fn spawn(command: &str, cwd: &Path) -> Option<Self> {
+    pub fn spawn(command: &str, cwd: &Path, mcp_servers: Vec<Value>) -> Option<Self> {
         let mut parts = command.split_whitespace();
         let program = parts.next()?;
         let mut child = Command::new(program)
@@ -115,7 +118,7 @@ impl AcpAgent {
             .ok()?;
         let stdout = child.stdout.take()?;
         let stdin = child.stdin.take()?;
-        let mut agent = Self::from_streams(Box::new(stdout), Box::new(stdin), cwd);
+        let mut agent = Self::from_streams(Box::new(stdout), Box::new(stdin), cwd, mcp_servers);
         agent.child = Some(child);
         agent.handshake()?;
         Some(agent)
@@ -130,7 +133,7 @@ impl AcpAgent {
         )?;
         let session = self.request(
             "session/new",
-            json!({"cwd": self.cwd.display().to_string(), "mcpServers": []}),
+            json!({"cwd": self.cwd.display().to_string(), "mcpServers": self.mcp_servers}),
             Duration::from_secs(20),
         )?;
         let id = session["sessionId"].as_str()?.to_string();
@@ -400,7 +403,7 @@ for line in sys.stdin:
     fn spawn_fake(cwd: &Path) -> Option<AcpAgent> {
         let script = std::env::temp_dir().join(format!("wb_fake_acp_{}.py", std::process::id()));
         std::fs::write(&script, FAKE_AGENT).unwrap();
-        AcpAgent::spawn(&format!("python3 {}", script.display()), cwd)
+        AcpAgent::spawn(&format!("python3 {}", script.display()), cwd, Vec::new())
     }
 
     fn wait_until(deadline_ms: u64, mut done: impl FnMut() -> bool) -> bool {

@@ -20,6 +20,7 @@ pub enum CommandId {
     OpenFileTree,
     OpenFilePicker,
     OpenAgentPane,
+    OpenSearchPane,
     Quit,
 }
 
@@ -75,6 +76,10 @@ pub fn commands() -> Vec<Command> {
         Command {
             id: CommandId::OpenAgentPane,
             title: "agent: open pane",
+        },
+        Command {
+            id: CommandId::OpenSearchPane,
+            title: "search: recall (hybrid)",
         },
         Command {
             id: CommandId::Quit,
@@ -289,6 +294,13 @@ impl Keymap {
                 mods: alt,
             },
             CommandId::OpenAgentPane,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('/'),
+                mods: alt,
+            },
+            CommandId::OpenSearchPane,
         );
         bindings.insert(
             Chord {

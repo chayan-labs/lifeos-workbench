@@ -29,6 +29,14 @@ async fn main() {
         );
         std::process::exit(1);
     }
+    if std::env::args().any(|a| a == "--mcp") {
+        // Toolbelt mode (issue #17): serve MCP over stdio for the ACP agent.
+        if let Err(e) = lifeos_workbench::mcp_server::serve_stdio(api).await {
+            eprintln!("workbench: mcp server error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--check") {
         println!(
             "workbench {}: lifeos-api linked in-process, health OK",
@@ -36,17 +44,17 @@ async fn main() {
         );
         return;
     }
-    if let Err(e) = run_shell() {
+    if let Err(e) = run_shell(api) {
         eprintln!("workbench: shell error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_shell() -> std::io::Result<()> {
+fn run_shell(api: InProcessApi) -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let theme = Theme::new(ColorSupport::detect());
     let mut shell = Shell::new(theme, DEFAULT_WORKSPACE.to_string());
-    let mut panes = PaneStore::new(&std::env::current_dir().unwrap_or_default());
+    let mut panes = PaneStore::new(&std::env::current_dir().unwrap_or_default(), Some(api));
     let result = (|| -> std::io::Result<()> {
         while shell.running {
             panes.sync(
@@ -87,6 +95,11 @@ fn forward_key(shell: &Shell, panes: &mut PaneStore, ev: &crossterm::event::Even
         lifeos_workbench::shell::PaneDesire::Agent => {
             if let Some(agent) = panes.agent_mut(focused) {
                 agent.on_key(key.code);
+            }
+        }
+        lifeos_workbench::shell::PaneDesire::Search => {
+            if let Some(search) = panes.search_mut(focused) {
+                search.on_key(key.code);
             }
         }
         lifeos_workbench::shell::PaneDesire::Terminal => {

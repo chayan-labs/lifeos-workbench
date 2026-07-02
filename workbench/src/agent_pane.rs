@@ -27,19 +27,24 @@ pub fn agent_command() -> String {
     std::env::var("WORKBENCH_AGENT_CMD").unwrap_or_else(|_| "claude-code-acp".into())
 }
 
+/// The toolbelt passed at session/new: this same binary re-entered as a
+/// stdio MCP server over the in-process lifeos-api (issue #17).
+pub fn toolbelt_servers() -> Vec<serde_json::Value> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    vec![serde_json::json!({
+        "name": "lifeos",
+        "command": exe.display().to_string(),
+        "args": ["--mcp"],
+        "env": []
+    })]
+}
+
 impl AgentPane {
     pub fn spawn(cwd: &Path) -> Self {
         Self {
-            agent: AcpAgent::spawn(&agent_command(), cwd),
-            input: String::new(),
-            focus: Focus::Input,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn with_agent(agent: AcpAgent) -> Self {
-        Self {
-            agent: Some(agent),
+            agent: AcpAgent::spawn(&agent_command(), cwd, toolbelt_servers()),
             input: String::new(),
             focus: Focus::Input,
         }

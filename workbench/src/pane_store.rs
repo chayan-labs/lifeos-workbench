@@ -6,9 +6,11 @@
 //! and the shell session (cwd, env, running job) survives the round trip.
 
 use crate::agent_pane::AgentPane;
+use crate::api::InProcessApi;
 use crate::editor::{EditorPane, LspOp};
 use crate::layout::PaneId;
 use crate::lsp::{server_for, LspClient};
+use crate::search_pane::SearchPane;
 use crate::shell::PaneDesire;
 use crate::term_pane::TermPane;
 use ratatui::layout::Rect;
@@ -23,12 +25,15 @@ pub struct PaneStore {
     /// means "tried, not installed" so we never respawn each frame.
     lsp: HashMap<&'static str, Option<Arc<LspClient>>>,
     root: PathBuf,
+    /// In-process lifeos-api handle for panes that query Life OS.
+    api: Option<InProcessApi>,
 }
 
 struct Entry {
     term: Option<TermPane>,
     editor: Option<EditorPane>,
     agent: Option<AgentPane>,
+    search: Option<SearchPane>,
     size: (u16, u16),
     lsp_synced_version: u64,
 }
@@ -42,9 +47,10 @@ fn inner(rect: Rect) -> (u16, u16) {
 }
 
 impl PaneStore {
-    pub fn new(root: &Path) -> Self {
+    pub fn new(root: &Path, api: Option<InProcessApi>) -> Self {
         Self {
             root: root.to_path_buf(),
+            api,
             ..Self::default()
         }
     }
@@ -60,6 +66,7 @@ impl PaneStore {
                 term: None,
                 editor: None,
                 agent: None,
+                search: None,
                 size: (0, 0),
                 lsp_synced_version: 0,
             });
@@ -80,6 +87,14 @@ impl PaneStore {
                 Some(PaneDesire::Agent) => {
                     if entry.agent.is_none() {
                         entry.agent = Some(AgentPane::spawn(&self.root));
+                    }
+                }
+                Some(PaneDesire::Search) => {
+                    if entry.search.is_none() {
+                        entry.search = self
+                            .api
+                            .as_ref()
+                            .map(|api| SearchPane::new(api.clone(), None));
                     }
                 }
                 _ => {
@@ -168,6 +183,14 @@ impl PaneStore {
     pub fn agent_mut(&mut self, id: PaneId) -> Option<&mut AgentPane> {
         self.panes.get_mut(&id).and_then(|e| e.agent.as_mut())
     }
+
+    pub fn search(&self, id: PaneId) -> Option<&SearchPane> {
+        self.panes.get(&id).and_then(|e| e.search.as_ref())
+    }
+
+    pub fn search_mut(&mut self, id: PaneId) -> Option<&mut SearchPane> {
+        self.panes.get_mut(&id).and_then(|e| e.search.as_mut())
+    }
 }
 
 #[cfg(test)]
@@ -181,7 +204,7 @@ mod tests {
 
     #[test]
     fn sync_spawns_reaps_and_resizes_terminals() {
-        let mut store = PaneStore::new(&std::env::temp_dir());
+        let mut store = PaneStore::new(&std::env::temp_dir(), None);
         let desires = HashMap::new();
         store.sync(&[(0, rect(40, 20))], &desires);
         assert!(store.term(0).is_some());
@@ -198,7 +221,7 @@ mod tests {
     fn editor_desire_opens_file_and_terminal_survives_the_flip() {
         let file = std::env::temp_dir().join(format!("wb_store_{}.txt", std::process::id()));
         std::fs::write(&file, "hello\n").unwrap();
-        let mut store = PaneStore::new(&std::env::temp_dir());
+        let mut store = PaneStore::new(&std::env::temp_dir(), None);
 
         let mut desires = HashMap::new();
         store.sync(&[(0, rect(40, 20))], &desires);

@@ -22,6 +22,7 @@ pub enum PaneDesire {
     Terminal,
     Editor(PathBuf),
     Agent,
+    Search,
 }
 
 /// Whole-shell state. Cloned-and-replaced per event (immutable convention).
@@ -185,7 +186,7 @@ impl Shell {
                         next.desires.insert(focused, PaneDesire::Terminal);
                     }
                     // No file yet: the picker chooses one, sharing the cwd.
-                    PaneDesire::Terminal | PaneDesire::Agent => {
+                    PaneDesire::Terminal | PaneDesire::Agent | PaneDesire::Search => {
                         next.picker = Some(PickerState::open(&self.cwd_path()));
                     }
                 }
@@ -193,6 +194,10 @@ impl Shell {
             CommandId::OpenAgentPane => {
                 next.desires
                     .insert(self.layout.tab().focused, PaneDesire::Agent);
+            }
+            CommandId::OpenSearchPane => {
+                next.desires
+                    .insert(self.layout.tab().focused, PaneDesire::Search);
             }
             CommandId::OpenFileTree => next.tree = Some(FileTree::open(&self.cwd_path())),
             CommandId::OpenFilePicker => next.picker = Some(PickerState::open(&self.cwd_path())),
@@ -283,6 +288,7 @@ impl Shell {
             ),
             PaneDesire::Terminal => format!(" pane {pane} "),
             PaneDesire::Agent => " agent ".to_string(),
+            PaneDesire::Search => " recall ".to_string(),
         };
         let block = Block::default()
             .borders(Borders::ALL)
@@ -308,6 +314,12 @@ impl Shell {
                     Paragraph::new(agent.render_lines(&self.theme, inner_height)).block(block)
                 }
                 None => Paragraph::new("starting agent…")
+                    .style(self.theme.muted())
+                    .block(block),
+            },
+            PaneDesire::Search => match panes.search(pane) {
+                Some(search) => Paragraph::new(search.render_lines(&self.theme)).block(block),
+                None => Paragraph::new("search unavailable (no api handle)")
                     .style(self.theme.muted())
                     .block(block),
             },
