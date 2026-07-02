@@ -4,5 +4,7 @@
 pub mod api;
 pub mod layout;
 pub mod palette;
+pub mod pane_store;
 pub mod shell;
+pub mod term_pane;
 pub mod theme;

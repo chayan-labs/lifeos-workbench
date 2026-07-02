@@ -6,6 +6,7 @@
 
 use crate::layout::{Layout, SplitDir};
 use crate::palette::{CommandId, Keymap, PaletteState};
+use crate::pane_store::PaneStore;
 use crate::theme::{self, StatuslineState, Theme};
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
@@ -74,6 +75,23 @@ impl Shell {
         }
     }
 
+    /// True when a key press is neither a chord nor palette input, so it
+    /// belongs to the focused terminal pane.
+    pub fn forwards_to_pane(&self, event: &Event) -> bool {
+        let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind,
+            ..
+        }) = event
+        else {
+            return false;
+        };
+        *kind == KeyEventKind::Press
+            && !self.palette.open
+            && self.keymap.lookup(*code, *modifiers).is_none()
+    }
+
     pub fn run_command(&self, cmd: CommandId) -> Shell {
         let mut next = self.clone();
         match cmd {
@@ -97,7 +115,20 @@ impl Shell {
         next
     }
 
-    pub fn draw(&self, frame: &mut Frame) {
+    /// The pane rectangles for the active tab, given the full frame area
+    /// (bottom line reserved for the statusline).
+    pub fn pane_rects(&self, area: Rect) -> Vec<(crate::layout::PaneId, Rect)> {
+        if area.height < 2 {
+            return Vec::new();
+        }
+        let body = Rect {
+            height: area.height - 1,
+            ..area
+        };
+        self.layout.tab().root.rects(body)
+    }
+
+    pub fn draw(&self, frame: &mut Frame, panes: &PaneStore) {
         let area = frame.area();
         if area.height < 2 {
             return;
@@ -125,14 +156,13 @@ impl Shell {
                 .border_set(border_set)
                 .border_style(border_style)
                 .title(format!(" pane {pane} "));
-            let hint = Paragraph::new("terminal pane (issue #4) - ctrl-k for commands")
-                .style(if focused {
-                    self.theme.text()
-                } else {
-                    self.theme.muted()
-                })
-                .block(block);
-            frame.render_widget(hint, rect);
+            let widget = match panes.get(pane) {
+                Some(term) => Paragraph::new(term.render_lines()).block(block),
+                None => Paragraph::new("no shell - ctrl-k for commands")
+                    .style(self.theme.muted())
+                    .block(block),
+            };
+            frame.render_widget(widget, rect);
         }
 
         frame.render_widget(

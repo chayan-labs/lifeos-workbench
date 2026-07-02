@@ -6,6 +6,7 @@
 use crossterm::event;
 use lifeos_api::config::{Config, DEFAULT_WORKSPACE};
 use lifeos_workbench::api::InProcessApi;
+use lifeos_workbench::pane_store::PaneStore;
 use lifeos_workbench::shell::Shell;
 use lifeos_workbench::theme::{ColorSupport, Theme};
 use std::time::Duration;
@@ -45,12 +46,22 @@ fn run_shell() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let theme = Theme::new(ColorSupport::detect());
     let mut shell = Shell::new(theme, DEFAULT_WORKSPACE.to_string());
+    let mut panes = PaneStore::default();
     let result = (|| -> std::io::Result<()> {
         while shell.running {
-            terminal.draw(|frame| shell.draw(frame))?;
-            if event::poll(Duration::from_millis(100))? {
+            panes.sync(&shell.pane_rects(terminal.get_frame().area()));
+            terminal.draw(|frame| shell.draw(frame, &panes))?;
+            if event::poll(Duration::from_millis(50))? {
                 let ev = event::read()?;
-                shell = shell.on_event(&ev);
+                if shell.forwards_to_pane(&ev) {
+                    if let (crossterm::event::Event::Key(key), Some(term)) =
+                        (&ev, panes.get_mut(shell.layout.tab().focused))
+                    {
+                        term.send_key(key);
+                    }
+                } else {
+                    shell = shell.on_event(&ev);
+                }
             }
         }
         Ok(())
