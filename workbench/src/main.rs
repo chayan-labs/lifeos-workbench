@@ -46,19 +46,18 @@ fn run_shell() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let theme = Theme::new(ColorSupport::detect());
     let mut shell = Shell::new(theme, DEFAULT_WORKSPACE.to_string());
-    let mut panes = PaneStore::default();
+    let mut panes = PaneStore::new(&std::env::current_dir().unwrap_or_default());
     let result = (|| -> std::io::Result<()> {
         while shell.running {
-            panes.sync(&shell.pane_rects(terminal.get_frame().area()));
-            terminal.draw(|frame| shell.draw(frame, &panes))?;
+            panes.sync(
+                &shell.pane_rects(terminal.get_frame().area()),
+                &shell.desires,
+            );
+            terminal.draw(|frame| shell.draw(frame, &mut panes))?;
             if event::poll(Duration::from_millis(50))? {
                 let ev = event::read()?;
                 if shell.forwards_to_pane(&ev) {
-                    if let (crossterm::event::Event::Key(key), Some(term)) =
-                        (&ev, panes.get_mut(shell.layout.tab().focused))
-                    {
-                        term.send_key(key);
-                    }
+                    forward_key(&shell, &mut panes, &ev);
                 } else {
                     shell = shell.on_event(&ev);
                 }
@@ -68,4 +67,27 @@ fn run_shell() -> std::io::Result<()> {
     })();
     ratatui::restore();
     result
+}
+
+/// Route a pane-bound key: editors get modal keys, terminals get VT bytes.
+fn forward_key(shell: &Shell, panes: &mut PaneStore, ev: &crossterm::event::Event) {
+    let crossterm::event::Event::Key(key) = ev else {
+        return;
+    };
+    let focused = shell.layout.tab().focused;
+    match shell.focused_desire() {
+        lifeos_workbench::shell::PaneDesire::Editor(_) => {
+            if let Some(editor) = panes.editor_mut(focused) {
+                let ctrl = key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL);
+                editor.on_key(key.code, ctrl);
+            }
+        }
+        lifeos_workbench::shell::PaneDesire::Terminal => {
+            if let Some(term) = panes.term_mut(focused) {
+                term.send_key(key);
+            }
+        }
+    }
 }

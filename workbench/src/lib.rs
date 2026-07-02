@@ -2,7 +2,11 @@
 //! can use the in-process API handle and shell components directly.
 
 pub mod api;
+pub mod editor;
+pub mod file_tree;
+pub mod highlight;
 pub mod layout;
+pub mod lsp;
 pub mod manifest;
 pub mod markdown;
 pub mod palette;

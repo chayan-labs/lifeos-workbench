@@ -16,6 +16,9 @@ pub enum CommandId {
     NewTab,
     NextTab,
     OpenPalette,
+    ToggleEditor,
+    OpenFileTree,
+    OpenFilePicker,
     Quit,
 }
 
@@ -55,6 +58,18 @@ pub fn commands() -> Vec<Command> {
         Command {
             id: CommandId::NextTab,
             title: "tab: next",
+        },
+        Command {
+            id: CommandId::ToggleEditor,
+            title: "pane: toggle editor/terminal",
+        },
+        Command {
+            id: CommandId::OpenFileTree,
+            title: "files: tree",
+        },
+        Command {
+            id: CommandId::OpenFilePicker,
+            title: "files: fuzzy picker",
         },
         Command {
             id: CommandId::Quit,
@@ -241,6 +256,27 @@ impl Keymap {
                 mods: ctrl,
             },
             CommandId::OpenPalette,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('e'),
+                mods: alt,
+            },
+            CommandId::ToggleEditor,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('f'),
+                mods: alt,
+            },
+            CommandId::OpenFileTree,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('o'),
+                mods: ctrl,
+            },
+            CommandId::OpenFilePicker,
         );
         bindings.insert(
             Chord {
