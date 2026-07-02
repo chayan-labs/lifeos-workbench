@@ -16,6 +16,24 @@ A **`lifeos-sync-events` bridge** in the existing **Stop hook** joins:
 into **one append-only `events` row per run** (`run_id, tier, model, tokens_in/out, cost, latency_ms, error, outcome, eval_score, gated`).
 Cloud rows are written by the Worker for bot runs. No new event store - the domain log *is* the run log.
 
+**Implemented (issue #95):** `~/.claude/bin/lifeos-sync-events` (global
+harness repo, not this one - see `~/.claude/SYSTEM.md`) is a third `Stop`
+hook entry that runs after `session-capture`. It reads the Stop hook's
+`session_id` off stdin, sums `metrics/costs.jsonl` rows matching that
+`session_id` for `tokens_in/out`/`cost`/`model` (exact key - authoritative),
+best-effort sums `logs/route.jsonl`'s `ms` field for entries whose
+timestamp falls inside that session's cost-log window for `latency_ms`
+(route.jsonl carries no `session_id`, so this is a time-window
+approximation, not a real join - documented gap), and derives `outcome`
+from a minimal transcript-tail heuristic (last ~50 lines, any `is_error`
+tool-result block → `outcome:"error"` + a truncated `error` snippet, else
+`"completed"`). `eval_score` is always `null` and `gated` always `0` -
+Eval+Gate (§2) is a separate, unbuilt system. Posts `type:"harness.run"` to
+the local `POST /api/event` (life-os's `lifeos-api`, port from
+`LIFEOS_API_PORT`, default `8080`); fails open (silently skipped, exits 0)
+if `lifeos-api` isn't running, matching `session-capture`'s own philosophy
+of never blocking Stop.
+
 ---
 
 ## 2. Eval + Gate
