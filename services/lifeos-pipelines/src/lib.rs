@@ -222,7 +222,7 @@ pub async fn process_pipeline_job(
         .ok_or_else(|| format!("unknown pipeline '{}'", payload.pipeline))?;
 
     let run_entity_id = new_id("ent");
-    let initial_attrs = json!({ "pipeline_id": spec.id, "input": payload.input, "status": "running" });
+    let initial_attrs = json!({ "pipeline_id": spec.id, "input": payload.input, "status": "running", "run_id": run_id });
     conn.execute(
         "INSERT INTO entities (id, workspace_id, module, type, attrs, source, created_at, updated_at) \
          VALUES (?1, ?2, 'pipelines', 'pipeline_run', ?3, 'lifeos-pipelines', ?4, ?4)",
@@ -446,6 +446,23 @@ mod tests {
         let payload = PipelineJobPayload { pipeline: "nonsense".into(), input: json!({}) };
         let result = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, 0).await;
         assert!(result.unwrap_err().contains("unknown pipeline"));
+    }
+
+    #[tokio::test]
+    async fn run_entity_records_its_own_run_id_for_frontend_history_joins() {
+        let conn = fresh_conn("/tmp/lifeos-pipelines-test-runid.db").await;
+        let runner = MockRunner::ok_sequence(&[
+            "a long researched summary about the topic",
+            "a long drafted post body about the topic",
+            "a long verification pass confirming the draft",
+        ]);
+        let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({}) };
+        process_pipeline_job(&conn, "ws1", "run_xyz", payload, &runner, 0).await.unwrap();
+
+        let mut rows = conn.query("SELECT attrs FROM entities WHERE type='pipeline_run'", ()).await.unwrap();
+        let attrs_str: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        let attrs: Value = serde_json::from_str(&attrs_str).unwrap();
+        assert_eq!(attrs["run_id"], "run_xyz");
     }
 
     #[tokio::test]

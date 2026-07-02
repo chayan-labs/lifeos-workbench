@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Database,
@@ -20,6 +20,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { apiCall } from '../lib/api';
+import { usePipelineRun } from '../lib/usePipelineRun';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('architecture');
@@ -50,85 +51,23 @@ export default function Dashboard() {
     verify: { label: '3. eval-gate', icon: ShieldCheck },
     publish: { label: '4. social.draft (Gated)', icon: Zap },
   };
-  const idlePipelineLogs = () =>
-    PIPELINE_STAGE_ORDER.map((stage) => ({ stage, ...PIPELINE_STAGE_META[stage], status: 'idle' }));
-
-  const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [pipelineLogs, setPipelineLogs] = useState(idlePipelineLogs());
-  const [pipelineRunState, setPipelineRunState] = useState(null); // null | 'completed' | 'failed' | 'awaiting_approval' | 'gated'
-
   const [actions, setActions] = useState([
     { id: 1, trigger: 'asset.version_created', action: 'draft social post', active: true },
     { id: 2, trigger: 'trade.closed', action: 'generate reflection draft', active: true },
     { id: 3, trigger: 'design_file.updated', action: 'run figma-implement-design', active: false }
   ]);
 
-  const pipelinePollRef = useRef(null);
-  const PIPELINE_POLL_MS = 2000;
-
-  useEffect(() => () => clearInterval(pipelinePollRef.current), []);
-
   // Real POST /api/pipeline/run (issue #92) + polling GET /api/event?run_id=
-  // for the job's per-stage events, replacing the old setTimeout-staged demo.
-  const runPipelineDemo = async () => {
-    clearInterval(pipelinePollRef.current);
-    setPipelineRunning(true);
-    setPipelineRunState(null);
-    setPipelineLogs(idlePipelineLogs());
-
-    const { ok, data, offline } = await apiCall('POST', '/api/pipeline/run', {
-      pipeline: 'post-from-topic',
-      input: {},
-    });
-    if (!ok || offline || !data?.job_id) {
-      setPipelineRunning(false);
-      setPipelineRunState('failed');
-      return;
-    }
-    const runId = data.job_id;
-
-    const poll = async () => {
-      const { ok: eventsOk, data: events, offline: eventsOffline } = await apiCall(
-        'GET',
-        `/api/event?run_id=${encodeURIComponent(runId)}`
-      );
-      if (!eventsOk || eventsOffline || !Array.isArray(events)) return;
-
-      const byTs = [...events].sort((a, b) => a.ts - b.ts);
-      const logs = idlePipelineLogs();
-      let terminal = null;
-      for (const evt of byTs) {
-        const stageIdx = PIPELINE_STAGE_ORDER.indexOf(evt.attrs?.stage);
-        if (stageIdx === -1) continue;
-        if (evt.type === 'pipeline.stage.completed') {
-          logs[stageIdx].status = 'done';
-        } else if (evt.type === 'pipeline.stage.failed') {
-          logs[stageIdx].status = 'failed';
-          terminal = 'failed';
-        } else if (evt.type === 'pipeline.stage.gated') {
-          logs[stageIdx].status = 'gated';
-          terminal = evt.outcome === 'awaiting_approval' ? 'awaiting_approval' : 'gated';
-        }
-      }
-      if (!terminal) {
-        const runningIdx = logs.findIndex((l) => l.status === 'idle');
-        if (runningIdx !== -1) {
-          logs[runningIdx].status = 'running';
-        } else {
-          terminal = 'completed';
-        }
-      }
-      setPipelineLogs(logs);
-      if (terminal) {
-        setPipelineRunState(terminal);
-        setPipelineRunning(false);
-        clearInterval(pipelinePollRef.current);
-      }
-    };
-
-    poll();
-    pipelinePollRef.current = setInterval(poll, PIPELINE_POLL_MS);
-  };
+  // for the job's per-stage events, via the shared hook (issue #94, also
+  // used by PipelineBuilder.jsx's Harness > Pipelines tab).
+  const {
+    logs: pipelineStageLogs,
+    running: pipelineRunning,
+    runState: pipelineRunState,
+    trigger: triggerPipeline,
+  } = usePipelineRun(PIPELINE_STAGE_ORDER);
+  const pipelineLogs = pipelineStageLogs.map((log) => ({ ...log, ...PIPELINE_STAGE_META[log.stage] }));
+  const runPipelineDemo = () => triggerPipeline('post-from-topic', {});
 
   const toggleAction = (actionId) => {
     setActions(actions.map(act => act.id === actionId ? { ...act, active: !act.active } : act));

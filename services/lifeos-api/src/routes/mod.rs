@@ -15,6 +15,7 @@ mod llm;
 mod metrics;
 mod module_request;
 mod notion;
+mod pipeline;
 mod planned;
 mod reading;
 mod register;
@@ -133,6 +134,8 @@ pub fn router(state: AppState) -> Router {
         // --- planned routes: enqueue where it makes sense, honest 501 otherwise ---
         .route("/api/ingest", post(planned::ingest))
         .route("/api/pipeline/run", post(planned::pipeline_run))
+        // --- pipeline DAG introspection (issue #94) - static registry, no tenant scoping ---
+        .route("/api/pipeline/registry", get(pipeline::registry))
         // --- read-only broker positions proxy (issue #51) - no order route exists ---
         .route("/api/broker/positions", get(kite::positions))
         .with_state(state)

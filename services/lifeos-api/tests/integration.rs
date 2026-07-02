@@ -391,6 +391,23 @@ async fn planned_routes_are_honest() {
     assert_eq!(body["status"], "queued");
 }
 
+/// Issue #94: the frontend inspects registered pipelines' DAG stages
+/// instead of hardcoding them - the route just mirrors
+/// `lifeos_pipelines::pipeline_registry()` as JSON.
+#[tokio::test]
+async fn pipeline_registry_lists_post_from_topic_with_its_four_stages() {
+    let app = test_app().await;
+    let (st, body) = send(&app.router, "GET", "/api/pipeline/registry", None).await;
+    assert_eq!(st, StatusCode::OK);
+    let pipelines = body.as_array().unwrap();
+    let post_from_topic = pipelines.iter().find(|p| p["id"] == "post-from-topic").unwrap();
+    let stages = post_from_topic["stages"].as_array().unwrap();
+    assert_eq!(stages.len(), 4);
+    let names: Vec<&str> = stages.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, vec!["research", "draft", "verify", "publish"]);
+    assert_eq!(stages[3]["gated"], true);
+}
+
 /// Issue #88: `entity_id` round-trips into the enqueued job's payload so
 /// `lifeos-drain`/`lifeos-ingest` know which entity to attach segments to.
 #[tokio::test]

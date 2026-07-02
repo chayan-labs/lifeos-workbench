@@ -212,6 +212,14 @@ export const API_ROUTES = [
     sample: { pipeline: 'social-draft', input: {} },
   },
   {
+    service: 'lifeos-pipelines',
+    method: 'GET',
+    path: '/api/pipeline/registry',
+    status: 'live',
+    summary: 'List registered pipelines and their DAG stages (issue #94) - static, no tenant scoping.',
+    sample: null,
+  },
+  {
     service: 'lifeos-vcs',
     method: 'GET',
     path: '/api/vcs/history',

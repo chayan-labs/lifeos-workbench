@@ -162,3 +162,19 @@ declared action fires on its event and enqueues the right job"). What the
 curve + journal, Telegram quiz) is deferred: `lifeos-drain` dispatches it
 as an honest `Dispatch::Stub`, the same acknowledged-but-not-yet-wired
 shape already accepted for `module_build`/`eval`/`reconcile`.
+
+**Frontend (issue #94):** `GET /api/pipeline/registry`
+(`services/lifeos-api/src/routes/pipeline.rs`) exposes
+`pipeline_registry()` as JSON so the UI no longer hardcodes stage names.
+`frontend/src/pages/Harness.jsx` gained a fourth "Pipelines" tab
+(`PipelineBuilder.jsx`): it lists every registered pipeline's DAG, triggers
+a run, and lists run history from `GET /api/entity?type=pipeline_run`,
+expanding a row to `GET /api/event?run_id=<attrs.run_id>` for that run's
+stage-by-stage outcome. This required one small addition to
+`process_pipeline_job` (`services/lifeos-pipelines/src/lib.rs`): the
+`pipeline_run` entity now records its own triggering `run_id` in `attrs`,
+so history rows can join to their events - without it, a listed run had no
+way to find its own stage log. The trigger + poll logic that used to live
+only in `Dashboard.jsx` is now a shared hook
+(`frontend/src/lib/usePipelineRun.js`) used by both the Dashboard demo
+widget and the new Pipelines tab.
