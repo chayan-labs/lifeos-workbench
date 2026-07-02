@@ -7,6 +7,5 @@ members = [
     "lifeos-pipelines",
     "lifeos-actions",
     "lifeos-drain",
-    "broker-guard",
     "lifeos-cli"
 ]

@@ -1,7 +1,0 @@
-[package]
-name = "broker-guard"
-version = "1.0.0"
-edition = "2021"
-
-[dependencies]
-# Small standard-library-only design
