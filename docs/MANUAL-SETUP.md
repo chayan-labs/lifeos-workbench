@@ -25,10 +25,24 @@ Nango instance and connecting a real account needs you:
    openssl rand -base64 32   # -> NANGO_ENCRYPTION_KEY (back this up outside git - immutable once real connections exist)
    openssl rand -hex 32      # -> NANGO_SECRET_KEY_DEV (and _PROD if you want a separate prod secret)
    ```
-   Pick a Postgres password and dashboard username/password while you're in there.
+   Pick a Postgres password while you're in there. (The `NANGO_DASHBOARD_USERNAME`/
+   `NANGO_DASHBOARD_PASSWORD` vars are inert in the `nangohq/nango-server:hosted`
+   0.70.x image - it uses an email/password account, not HTTP basic-auth - so
+   they can be left at their defaults.)
 
 2. **Bring it up**: `docker compose up -d` from `infra/nango/`. Dashboard at
-   `http://localhost:3003` (basic-auth with the credentials you just set).
+   `http://localhost:3003`. **First-run login is a sign-up, not basic-auth:**
+   open `/signup`, enter any email (it's a local account - a real address is
+   not required) and a password. No SMTP is configured, so the verification
+   email is not sent - instead Nango logs the verification link. Grab and open
+   it:
+   ```sh
+   docker logs nango-nango-server-1 2>&1 \
+     | grep -oE 'http://localhost:3003/signup/verification/[0-9a-f-]+' | tail -1
+   ```
+   Open that URL in the browser (it verifies the account), then sign in. (To
+   verify headlessly instead of clicking, POST the token to
+   `/api/v1/account/verify/code` as `{"token":"<uuid from the link>"}`.)
 
 3. **Register a GitHub OAuth app** (developer settings -> OAuth Apps -> New):
    - Homepage URL: `http://localhost:3003`
