@@ -5,6 +5,7 @@
 //! terminal and its editor alive, so flipping terminal<->editor is instant
 //! and the shell session (cwd, env, running job) survives the round trip.
 
+use crate::agent_pane::AgentPane;
 use crate::editor::{EditorPane, LspOp};
 use crate::layout::PaneId;
 use crate::lsp::{server_for, LspClient};
@@ -27,6 +28,7 @@ pub struct PaneStore {
 struct Entry {
     term: Option<TermPane>,
     editor: Option<EditorPane>,
+    agent: Option<AgentPane>,
     size: (u16, u16),
     lsp_synced_version: u64,
 }
@@ -57,6 +59,7 @@ impl PaneStore {
             let entry = self.panes.entry(*id).or_insert_with(|| Entry {
                 term: None,
                 editor: None,
+                agent: None,
                 size: (0, 0),
                 lsp_synced_version: 0,
             });
@@ -72,6 +75,11 @@ impl PaneStore {
                     if stale {
                         entry.editor = EditorPane::open(path).ok();
                         entry.lsp_synced_version = 0;
+                    }
+                }
+                Some(PaneDesire::Agent) => {
+                    if entry.agent.is_none() {
+                        entry.agent = Some(AgentPane::spawn(&self.root));
                     }
                 }
                 _ => {
@@ -151,6 +159,14 @@ impl PaneStore {
 
     pub fn editor_mut(&mut self, id: PaneId) -> Option<&mut EditorPane> {
         self.panes.get_mut(&id).and_then(|e| e.editor.as_mut())
+    }
+
+    pub fn agent(&self, id: PaneId) -> Option<&AgentPane> {
+        self.panes.get(&id).and_then(|e| e.agent.as_ref())
+    }
+
+    pub fn agent_mut(&mut self, id: PaneId) -> Option<&mut AgentPane> {
+        self.panes.get_mut(&id).and_then(|e| e.agent.as_mut())
     }
 }
 

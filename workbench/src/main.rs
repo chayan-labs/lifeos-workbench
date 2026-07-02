@@ -84,6 +84,11 @@ fn forward_key(shell: &Shell, panes: &mut PaneStore, ev: &crossterm::event::Even
                 editor.on_key(key.code, ctrl);
             }
         }
+        lifeos_workbench::shell::PaneDesire::Agent => {
+            if let Some(agent) = panes.agent_mut(focused) {
+                agent.on_key(key.code);
+            }
+        }
         lifeos_workbench::shell::PaneDesire::Terminal => {
             if let Some(term) = panes.term_mut(focused) {
                 term.send_key(key);

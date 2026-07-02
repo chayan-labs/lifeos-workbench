@@ -19,6 +19,7 @@ pub enum CommandId {
     ToggleEditor,
     OpenFileTree,
     OpenFilePicker,
+    OpenAgentPane,
     Quit,
 }
 
@@ -70,6 +71,10 @@ pub fn commands() -> Vec<Command> {
         Command {
             id: CommandId::OpenFilePicker,
             title: "files: fuzzy picker",
+        },
+        Command {
+            id: CommandId::OpenAgentPane,
+            title: "agent: open pane",
         },
         Command {
             id: CommandId::Quit,
@@ -277,6 +282,13 @@ impl Keymap {
                 mods: ctrl,
             },
             CommandId::OpenFilePicker,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('a'),
+                mods: alt,
+            },
+            CommandId::OpenAgentPane,
         );
         bindings.insert(
             Chord {

@@ -21,6 +21,7 @@ use std::path::PathBuf;
 pub enum PaneDesire {
     Terminal,
     Editor(PathBuf),
+    Agent,
 }
 
 /// Whole-shell state. Cloned-and-replaced per event (immutable convention).
@@ -184,10 +185,14 @@ impl Shell {
                         next.desires.insert(focused, PaneDesire::Terminal);
                     }
                     // No file yet: the picker chooses one, sharing the cwd.
-                    PaneDesire::Terminal => {
+                    PaneDesire::Terminal | PaneDesire::Agent => {
                         next.picker = Some(PickerState::open(&self.cwd_path()));
                     }
                 }
+            }
+            CommandId::OpenAgentPane => {
+                next.desires
+                    .insert(self.layout.tab().focused, PaneDesire::Agent);
             }
             CommandId::OpenFileTree => next.tree = Some(FileTree::open(&self.cwd_path())),
             CommandId::OpenFilePicker => next.picker = Some(PickerState::open(&self.cwd_path())),
@@ -235,6 +240,9 @@ impl Shell {
                 status.mode = editor.status();
             }
         }
+        if let Some(agent) = panes.agent(tab.focused) {
+            status.agent = agent.status();
+        }
         frame.render_widget(
             Paragraph::new(theme::statusline(&self.theme, &status)),
             status_row,
@@ -274,6 +282,7 @@ impl Shell {
                     .unwrap_or_default()
             ),
             PaneDesire::Terminal => format!(" pane {pane} "),
+            PaneDesire::Agent => " agent ".to_string(),
         };
         let block = Block::default()
             .borders(Borders::ALL)
@@ -291,6 +300,14 @@ impl Shell {
             PaneDesire::Terminal => match panes.term(pane) {
                 Some(term) => Paragraph::new(term.render_lines()).block(block),
                 None => Paragraph::new("no shell - ctrl-k for commands")
+                    .style(self.theme.muted())
+                    .block(block),
+            },
+            PaneDesire::Agent => match panes.agent(pane) {
+                Some(agent) => {
+                    Paragraph::new(agent.render_lines(&self.theme, inner_height)).block(block)
+                }
+                None => Paragraph::new("starting agent…")
                     .style(self.theme.muted())
                     .block(block),
             },
