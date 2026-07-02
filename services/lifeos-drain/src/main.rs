@@ -19,9 +19,16 @@
 //! whisper.cpp model, e.g. ggml-tiny.en.bin - without it, audio ingest jobs
 //! fail loudly rather than silently producing zero segments, see #89),
 //! ANTHROPIC_API_KEY (optional - without it, image ingest jobs fail loudly,
-//! see #90, and pipeline jobs fail loudly too, see #92), LIFEOS_TESSERACT_BIN
+//! see #90, and pipeline jobs fail loudly too, see #92; it also gates
+//! whether the pipeline eval stage uses a real Haiku judge or the length
+//! heuristic fallback, see #96), LIFEOS_TESSERACT_BIN
 //! (optional path to the `tesseract` CLI binary - without it, image ingest
 //! still captions, just without OCR text, see #90).
+//! PIPELINE_EVAL_SAMPLE_RATE (default 0.2 - fraction of eval-gated stages
+//! that call the real Haiku judge; the rest use the heuristic fallback,
+//! keeping the judge "cents/day"), TELEGRAM_ADMIN_CHAT_ID (optional -
+//! without it, a gated pipeline's rationale is only logged locally, see
+//! #96).
 //!
 //! Each poll tick also runs the Life OS Actions engine (issue #93,
 //! `lifeos_actions::run_action_engine_tick`) - no extra env var needed, it
@@ -30,15 +37,18 @@
 
 use libsql::Builder;
 use lifeos_drain::{
-    claim_job, claim_next_module_request, complete_job, dispatch, fail_job, reap_stuck,
-    run_module_build, Dispatch, DrainConfig, NoopNotifier, Notifier, ScaffoldJsBuilder,
+    claim_job, claim_next_module_request, complete_job, dispatch, fail_job, notify_pipeline_gated,
+    reap_stuck, run_module_build, Dispatch, DrainConfig, NoopNotifier, Notifier, ScaffoldJsBuilder,
     TelegramNotifier,
 };
 use lifeos_ingest::{
     Captioner, Embedder, HaikuCaptioner, IngestJobPayload, NoopCaptioner, NoopEmbedder, NoopOcr,
     NoopTranscriber, Ocr, SubprocessEmbedder, TesseractOcr, Transcriber, WhisperTranscriber,
 };
-use lifeos_pipelines::{HaikuStageRunner, NoopStageRunner, PipelineJobPayload, PipelineStageRunner};
+use lifeos_pipelines::{
+    HaikuJudge, HaikuStageRunner, Judge, NoopStageRunner, PipelineJobPayload, PipelineOutcome,
+    PipelineStageRunner,
+};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 
@@ -50,6 +60,13 @@ fn now_secs() -> i64 {
 }
 
 fn env_int(key: &str, default: i64) -> i64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_float(key: &str, default: f64) -> f64 {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())
@@ -135,6 +152,23 @@ async fn main() {
         }
     };
 
+    // Real Haiku judge when a key is configured; otherwise fall back to
+    // `HeuristicJudge` itself (it implements `Judge` too) so eval-gated
+    // stages keep #92's original length-based behavior rather than every
+    // gate call erroring.
+    let pipeline_judge: Box<dyn Judge> = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(api_key) if !api_key.is_empty() => Box::new(HaikuJudge { api_key }),
+        _ => {
+            println!("lifeos-drain: ANTHROPIC_API_KEY not set, pipeline eval gate will use the length heuristic only");
+            Box::new(lifeos_pipelines::HeuristicJudge)
+        }
+    };
+    let pipeline_eval_sample_rate = env_float("PIPELINE_EVAL_SAMPLE_RATE", 0.2);
+    let telegram_admin_chat_id = std::env::var("TELEGRAM_ADMIN_CHAT_ID").ok();
+    if telegram_admin_chat_id.is_none() {
+        println!("lifeos-drain: TELEGRAM_ADMIN_CHAT_ID not set, gated pipeline rationales will only be logged");
+    }
+
     loop {
         match claim_job(&conn, &worker_id, now_secs(), cfg).await {
             Ok(Some(job)) => {
@@ -148,6 +182,10 @@ async fn main() {
                     captioner.as_ref(),
                     ocr.as_ref(),
                     pipeline_runner.as_ref(),
+                    pipeline_judge.as_ref(),
+                    pipeline_eval_sample_rate,
+                    notifier.as_ref(),
+                    telegram_admin_chat_id.as_deref(),
                 )
                 .await
             }
@@ -187,6 +225,10 @@ async fn run_job(
     captioner: &dyn Captioner,
     ocr: &dyn Ocr,
     pipeline_runner: &dyn PipelineStageRunner,
+    pipeline_judge: &dyn Judge,
+    pipeline_eval_sample_rate: f64,
+    notifier: &dyn Notifier,
+    telegram_admin_chat_id: Option<&str>,
 ) {
     println!("lifeos-drain: claimed {} (kind={})", job.id, job.kind);
     let result = match dispatch(&job.kind) {
@@ -227,12 +269,23 @@ async fn run_job(
                 &job.id,
                 payload,
                 pipeline_runner,
+                pipeline_judge,
+                pipeline_eval_sample_rate,
                 now_secs(),
             )
             .await
             {
                 Ok(outcome) => {
                     println!("lifeos-drain: {} pipeline -> {outcome:?}", job.id);
+                    if let PipelineOutcome::Gated { stage, rationale } = &outcome {
+                        match telegram_admin_chat_id {
+                            Some(chat_id) => notify_pipeline_gated(notifier, chat_id, stage, rationale).await,
+                            None => println!(
+                                "lifeos-drain: {} pipeline gated at '{stage}': {rationale}",
+                                job.id
+                            ),
+                        }
+                    }
                     complete_job(conn, &job.id, worker_id).await
                 }
                 Err(e) => {

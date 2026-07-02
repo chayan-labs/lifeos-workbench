@@ -47,11 +47,12 @@ speculative.
 
 Each stage writes one `events` row with the full harness run-log columns
 (`run_id` = the job id, `tier='mac'`, `model`, `tokens_in/out`, `latency_ms`,
-`outcome`). A `gate:'eval'` stage (`verify` above) runs a real but
-intentionally minimal heuristic (`eval_stage_output`) - not the full
-LLM-as-judge system in [HARNESS-LOOP.md](./HARNESS-LOOP.md) §2, which is a
-separate, larger, unbuilt system - and halts the run (`gated=1` on that
-event) if the score is below threshold. Any stage marked `gated: true`
+`outcome`). A `gate:'eval'` stage (`verify` above) runs the real
+LLM-as-judge system from [HARNESS-LOOP.md](./HARNESS-LOOP.md) §2 (issue
+#96: `eval_gate::HaikuJudge`, content-cached + sampled, falling back to
+the original length heuristic `eval_gate::HeuristicJudge` when no judge
+call is made) and halts the run (`gated=1` on that event) if the score is
+below threshold. Any stage marked `gated: true`
 (`publish` above) is **unconditional**: the runner is never called for it;
 instead a `pending_approval` entity is drafted (same "only ever drafts"
 shape as `integrations.rs::draft_action`, `whatsapp.rs`, `slack.rs`,

@@ -38,7 +38,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use ulid::{Generator, Ulid};
 
+pub mod eval_gate;
 pub mod runner;
+pub use eval_gate::{HaikuJudge, HeuristicJudge, Judge};
 pub use runner::{HaikuStageRunner, NoopStageRunner, PipelineStageRunner, StageResult};
 
 static ID_GENERATOR: Mutex<Generator> = Mutex::new(Generator::new());
@@ -173,23 +175,14 @@ async fn emit_run_event(
 
 // --------------------------------------------------------------- eval
 
-/// A real but intentionally minimal gate heuristic - see module doc. Not
-/// the LLM-as-judge system in docs/HARNESS-LOOP.md §2.
+/// See `eval_gate` module doc (issue #96) for the real judge/cache/sample
+/// pipeline this threshold now gates - the length-only heuristic
+/// (`eval_stage_output`, issue #92) lives on as `eval_gate::HeuristicJudge`,
+/// the fallback for no-API-key / not-sampled / judge-error cases.
 const EVAL_THRESHOLD: f64 = 0.3;
 
-pub fn eval_stage_output(output: &Value) -> f64 {
-    let text_len = output
-        .get("text")
-        .and_then(|t| t.as_str())
-        .map(|s| s.trim().len())
-        .unwrap_or(0);
-    if text_len == 0 {
-        0.0
-    } else if text_len < 10 {
-        0.2
-    } else {
-        1.0
-    }
+fn stage_output_text(output: &Value) -> String {
+    output.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string()
 }
 
 // --------------------------------------------------------------- run
@@ -205,15 +198,18 @@ pub struct PipelineJobPayload {
 pub enum PipelineOutcome {
     Completed,
     AwaitingApproval { stage: String },
-    Gated { stage: String },
+    Gated { stage: String, rationale: String },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn process_pipeline_job(
     conn: &Connection,
     workspace_id: &str,
     run_id: &str,
     payload: PipelineJobPayload,
     runner: &(dyn PipelineStageRunner + Sync),
+    judge: &(dyn Judge + Sync),
+    sample_rate: f64,
     now: i64,
 ) -> Result<PipelineOutcome, String> {
     let registry = pipeline_registry();
@@ -288,10 +284,22 @@ pub async fn process_pipeline_job(
                 let latency_ms = Some((now - started).max(0));
                 let mut eval_score = None;
                 let mut gated_now = false;
+                let mut rationale = String::new();
                 if stage.gate == Some("eval") {
-                    let score = eval_stage_output(&stage_result.output);
+                    let text = stage_output_text(&stage_result.output);
+                    let (score, r) = eval_gate::judge_stage_output(
+                        conn,
+                        workspace_id,
+                        judge,
+                        &HeuristicJudge,
+                        &text,
+                        sample_rate,
+                        now,
+                    )
+                    .await;
                     eval_score = Some(score);
                     gated_now = score < EVAL_THRESHOLD;
+                    rationale = r;
                 }
 
                 emit_run_event(
@@ -308,7 +316,7 @@ pub async fn process_pipeline_job(
                     Some(if gated_now { "gated" } else { "completed" }),
                     eval_score,
                     gated_now,
-                    &json!({ "stage": stage.name, "output": stage_result.output }),
+                    &json!({ "stage": stage.name, "output": stage_result.output, "rationale": rationale }),
                     now,
                 )
                 .await
@@ -316,7 +324,7 @@ pub async fn process_pipeline_job(
 
                 if gated_now {
                     set_run_status(conn, &run_entity_id, "gated", now).await?;
-                    return Ok(PipelineOutcome::Gated { stage: stage.name.to_string() });
+                    return Ok(PipelineOutcome::Gated { stage: stage.name.to_string(), rationale });
                 }
 
                 prior_outputs.push(stage_result.output);
@@ -444,7 +452,7 @@ mod tests {
         let conn = fresh_conn("/tmp/lifeos-pipelines-test-unknown.db").await;
         let runner = MockRunner::ok_sequence(&[]);
         let payload = PipelineJobPayload { pipeline: "nonsense".into(), input: json!({}) };
-        let result = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, 0).await;
+        let result = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, &HeuristicJudge, 1.0, 0).await;
         assert!(result.unwrap_err().contains("unknown pipeline"));
     }
 
@@ -457,7 +465,7 @@ mod tests {
             "a long verification pass confirming the draft",
         ]);
         let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({}) };
-        process_pipeline_job(&conn, "ws1", "run_xyz", payload, &runner, 0).await.unwrap();
+        process_pipeline_job(&conn, "ws1", "run_xyz", payload, &runner, &HeuristicJudge, 1.0, 0).await.unwrap();
 
         let mut rows = conn.query("SELECT attrs FROM entities WHERE type='pipeline_run'", ()).await.unwrap();
         let attrs_str: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
@@ -475,7 +483,7 @@ mod tests {
             "a long verification pass confirming the draft",
         ]);
         let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({"topic": "rust"}) };
-        let outcome = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, 0).await.unwrap();
+        let outcome = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, &HeuristicJudge, 1.0, 0).await.unwrap();
         assert_eq!(outcome, PipelineOutcome::AwaitingApproval { stage: "publish".to_string() });
 
         let mut rows = conn.query("SELECT attrs FROM entities WHERE type='pipeline_run'", ()).await.unwrap();
@@ -502,8 +510,8 @@ mod tests {
         let runner =
             MockRunner::ok_sequence(&["a long researched summary", "a long drafted post body", ""]);
         let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({}) };
-        let outcome = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, 0).await.unwrap();
-        assert_eq!(outcome, PipelineOutcome::Gated { stage: "verify".to_string() });
+        let outcome = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, &HeuristicJudge, 1.0, 0).await.unwrap();
+        assert_eq!(outcome, PipelineOutcome::Gated { stage: "verify".to_string(), rationale: "output is empty".to_string() });
 
         // publish must never have been reached: only 3 events (research, draft, verify-gated).
         let mut rows = conn.query("SELECT id FROM entities WHERE type='pipeline_run'", ()).await.unwrap();
@@ -517,12 +525,43 @@ mod tests {
         assert_eq!(n, 0);
     }
 
+    struct StubLowJudge;
+    #[async_trait]
+    impl Judge for StubLowJudge {
+        async fn score(&self, _content: &str) -> Result<(f64, String), String> {
+            Ok((0.1, "reads like a placeholder, not a real draft".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn real_judge_gate_carries_its_rationale_through_the_outcome() {
+        let conn = fresh_conn("/tmp/lifeos-pipelines-test-judgegate.db").await;
+        // verify's text is non-empty (passes the heuristic) but StubLowJudge scores it low.
+        let runner = MockRunner::ok_sequence(&[
+            "a long researched summary",
+            "a long drafted post body",
+            "a long verification pass confirming the draft",
+        ]);
+        let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({}) };
+        let outcome =
+            process_pipeline_job(&conn, "ws1", "run1", payload, &runner, &StubLowJudge, 1.0, 0)
+                .await
+                .unwrap();
+        assert_eq!(
+            outcome,
+            PipelineOutcome::Gated {
+                stage: "verify".to_string(),
+                rationale: "reads like a placeholder, not a real draft".to_string(),
+            }
+        );
+    }
+
     #[tokio::test]
     async fn stage_runner_error_fails_the_whole_job() {
         let conn = fresh_conn("/tmp/lifeos-pipelines-test-fail.db").await;
         let runner = MockRunner::failing();
         let payload = PipelineJobPayload { pipeline: "post-from-topic".into(), input: json!({}) };
-        let result = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, 0).await;
+        let result = process_pipeline_job(&conn, "ws1", "run1", payload, &runner, &HeuristicJudge, 1.0, 0).await;
         assert!(result.unwrap_err().contains("mock failure"));
 
         let mut rows = conn.query("SELECT attrs FROM entities WHERE type='pipeline_run'", ()).await.unwrap();

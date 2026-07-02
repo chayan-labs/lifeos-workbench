@@ -467,6 +467,16 @@ impl Notifier for NoopNotifier {
     async fn notify(&self, _chat_id: &str, _text: &str) {}
 }
 
+/// Delivers a pipeline eval-gate rationale (issue #96,
+/// docs/HARNESS-LOOP.md §2) - a single-user "admin" ping, unlike
+/// `run_module_build`'s per-requester notify, since a pipeline run has no
+/// associated `chat_id`. Kept as a small directly-testable function (same
+/// reasoning as `run_module_build`) rather than inline in `main.rs`.
+pub async fn notify_pipeline_gated(notifier: &dyn Notifier, chat_id: &str, stage: &str, rationale: &str) {
+    let text = format!("\u{26d4} pipeline gated at stage '{stage}': {rationale}");
+    notifier.notify(chat_id, &text).await;
+}
+
 /// Runs a claimed module request's build to completion: calls `builder`,
 /// applies the matching `module_requests` transition, and notifies the
 /// requester's chat (if any). This is the orchestration `main.rs`'s loop
@@ -687,6 +697,16 @@ mod tests {
         async fn notify(&self, chat_id: &str, text: &str) {
             self.calls.lock().unwrap().push((chat_id.to_string(), text.to_string()));
         }
+    }
+
+    #[tokio::test]
+    async fn notify_pipeline_gated_sends_the_rationale_to_the_admin_chat() {
+        let notifier = MockNotifier::default();
+        notify_pipeline_gated(&notifier, "admin_chat", "verify", "reads like a placeholder").await;
+        let calls = notifier.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "admin_chat");
+        assert_eq!(calls[0].1, "\u{26d4} pipeline gated at stage 'verify': reads like a placeholder");
     }
 
     #[tokio::test]

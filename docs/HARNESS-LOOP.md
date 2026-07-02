@@ -43,6 +43,30 @@ of never blocking Stop.
 - **`eval-gate`** wraps the commit/sync/job-complete boundary: below threshold → `gated=1`, ship blocked, rationale to Telegram.
 - **Trade analysis is judged on data-grounding only - never PnL, never auto-acts.** (Reinforces the trading read-only guarantee in [SECURITY.md](./SECURITY.md).)
 
+**Implemented (issue #96):** the pipeline `gate: "eval"` stage (the one
+concrete gate boundary that exists - `verify` before `publish` in
+`post-from-topic`, see §6) now uses a real Haiku judge
+(`services/lifeos-pipelines/src/eval_gate.rs::HaikuJudge`, same
+direct-`reqwest`-to-the-Anthropic-Messages-API pattern as
+`lifeos-ingest/src/vision.rs::HaikuCaptioner`) instead of the length-only
+heuristic from #92 (`HeuristicJudge`, kept as the always-available
+fallback for no `ANTHROPIC_API_KEY`, a not-sampled call, or a judge
+error - the run must never fail because judging failed). Content-cached
+via a `blake3`-hashed `entities` row (`module='harness', type='eval_cache'`
+- "zero new tables"); sampled via `PIPELINE_EVAL_SAMPLE_RATE` (default
+0.2) using **deterministic** hash-based sampling (no `rand`, so the same
+content always makes the same sample decision and tests stay
+reproducible) to keep cost at cents/day. On a gate, `lifeos-drain` posts
+the judge's rationale to `TELEGRAM_ADMIN_CHAT_ID` via the existing
+`Notifier`/`TelegramNotifier` (already wired for module-build pings) -
+`services/lifeos-drain/src/lib.rs::notify_pipeline_gated`; unset chat id
+degrades to a local log line, matching the existing missing-bot-token
+behavior. **Scope note:** only the existing pipeline eval-gate boundary is
+upgraded in this pass - `lifeos-vcs` commits and libSQL sync are not
+gated (commits are mechanical saves with no natural quality judgement,
+and sync has no interception point at all); a future issue would extend
+gating there if ever wanted.
+
 ---
 
 ## 3. Observe
