@@ -377,6 +377,29 @@ async fn metrics_aggregates_over_the_workspace() {
 }
 
 #[tokio::test]
+async fn metrics_breaks_down_events_by_tier_and_phase() {
+    let app = test_app().await;
+    send(
+        &app.router,
+        "POST",
+        "/api/event",
+        Some(json!({"type": "harness.run", "tier": "mac"})),
+    )
+    .await;
+    send(
+        &app.router,
+        "POST",
+        "/api/event",
+        Some(json!({"type": "pipeline.stage.completed", "attrs": {"stage": "verify"}})),
+    )
+    .await;
+    let (st, body) = send(&app.router, "GET", "/api/metrics", None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["events_by_tier"]["mac"], 1);
+    assert_eq!(body["events_by_phase"]["verify"], 1);
+}
+
+#[tokio::test]
 async fn planned_routes_are_honest() {
     let app = test_app().await;
     // ingest enqueues a job -> 202.

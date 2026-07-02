@@ -77,6 +77,24 @@ A `harness observe` case beside `route-stats`:
 - Surfaces a **cloud free-tier + Haiku-spend meter** (so the always-on lane never surprises you).
 - Feeds the per-module dashboards (see [PLATFORM-SYSTEMS.md](./PLATFORM-SYSTEMS.md) §2) - same `events` source, different lens.
 
+**Implemented (issue #97):** `GET /api/metrics`
+(`services/lifeos-api/src/routes/metrics.rs`) gained `events_by_tier` and
+`events_by_phase` (real SQL `GROUP BY`, the latter via
+`json_extract(attrs, '$.stage')` - populated only for events that stamp
+`attrs.stage`, i.e. pipeline stage events from #92/#96; most event types
+have no phase concept yet, which is honest, not a bug). `~/.claude/bin/harness-observe`
+(global harness repo, not this one - see `~/.claude/SYSTEM.md`), wired as
+`harness observe`, renders this plus `entities_by_module` (the existing
+module lens) as a `route-stats`-style report, and a real Haiku-spend-today
+meter (`SUM(cost) WHERE model LIKE '%haiku%' AND` today, vs
+`HARNESS_HAIKU_DAILY_BUDGET_USD`). It prefers `GET /api/metrics` when
+`lifeos-api` is reachable, falling back to a direct `sqlite3` read of the
+DB file otherwise (same fail-open shape as #95's `lifeos-sync-events`).
+**Scope note:** the cloud free-tier meter is a deferred gap - there is no
+Cloudflare Workers API wiring in this repo to read live Workers/Turso
+usage, so `harness observe` prints an explicit "not tracked" line rather
+than a fabricated number.
+
 ---
 
 ## 4. Release loop
