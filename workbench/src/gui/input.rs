@@ -71,6 +71,29 @@ pub fn translate_key(logical: &Key, mods: ModifiersState) -> Option<Event> {
     Some(Event::Key(KeyEvent::new(code, m)))
 }
 
+/// Turn pasted / IME-committed text into key events for the focused pane
+/// (issue #28). Newlines become Enter, tabs become Tab; carriage returns in
+/// CRLF pairs collapse into a single Enter.
+pub fn text_to_events(text: &str) -> Vec<Event> {
+    let mut out = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let code = match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                KeyCode::Enter
+            }
+            '\n' => KeyCode::Enter,
+            '\t' => KeyCode::Tab,
+            c => KeyCode::Char(c),
+        };
+        out.push(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +150,30 @@ mod tests {
             let k = key(translate_key(&Key::Named(named), ModifiersState::empty()));
             assert_eq!(k.code, code);
         }
+    }
+
+    #[test]
+    fn text_to_events_maps_newlines_tabs_and_crlf() {
+        let evs = text_to_events("ab\r\nc\td\n");
+        let codes: Vec<KeyCode> = evs
+            .iter()
+            .map(|e| match e {
+                Event::Key(k) => k.code,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                KeyCode::Char('a'),
+                KeyCode::Char('b'),
+                KeyCode::Enter,
+                KeyCode::Char('c'),
+                KeyCode::Tab,
+                KeyCode::Char('d'),
+                KeyCode::Enter,
+            ]
+        );
     }
 
     #[test]

@@ -2,20 +2,27 @@
 //! renderer (`ratatui-wgpu`) implementing ratatui's `Backend`, so the whole
 //! shell - panes, editor, terminals, agent, Life OS views - runs unmodified.
 //! This is the primary face of the app; `--tui` keeps the crossterm path.
+//!
+//! Window-mode polish (issues #27/#28): real font variants + CJK/symbol
+//! fallbacks, pixel-exact centered blit with theme-colored padding, live
+//! scale-factor handling, native menu bar, Cmd+V paste, IME commit, and
+//! drag-and-drop opening files in the editor.
 
 pub mod fonts;
 pub mod input;
+pub mod postprocess;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use muda::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
 use ratatui::Terminal;
-use ratatui_wgpu::{Builder, Dimensions, WgpuBackend};
+use ratatui_wgpu::{Builder, Dimensions, Fonts, Viewport, WgpuBackend};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState};
 use winit::window::{Window, WindowAttributes};
 
 use crate::api::InProcessApi;
@@ -23,44 +30,104 @@ use crate::driver;
 use crate::pane_store::PaneStore;
 use crate::shell::Shell;
 use crate::theme::{ColorSupport, Theme, BG};
+use postprocess::CenteredPostProcessor;
 
 /// Frame cadence while idle: terminal panes produce output asynchronously,
 /// so redraw on a short tick (mirrors the 50ms poll of the TUI loop).
 const IDLE_FRAME: Duration = Duration::from_millis(50);
 const DEFAULT_FONT_PT: f64 = 13.0;
+/// Minimum window padding reserved around the grid, in logical px per side.
+const PADDING_LOGICAL: f64 = 8.0;
+
+type GpuTerminal = Terminal<WgpuBackend<'static, 'static, CenteredPostProcessor>>;
 
 pub fn run_gui(api: InProcessApi, workspace: String) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + IDLE_FRAME));
     let cwd = std::env::current_dir().unwrap_or_default();
+    let fonts = fonts::load_fonts()?;
     let mut app = GuiApp {
         window: None,
         terminal: None,
-        shell: Some(Shell::new(Theme::new(ColorSupport::TrueColor), workspace)),
+        shell: Some(Shell::new(
+            Theme::new(ColorSupport::TrueColor),
+            workspace.clone(),
+        )),
         panes: PaneStore::new(&cwd, Some(api)),
         modifiers: ModifiersState::empty(),
+        fonts,
+        title: window_title(&workspace, &cwd),
+        _menu: build_menu_bar(),
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())
 }
 
+fn window_title(workspace: &str, cwd: &std::path::Path) -> String {
+    let dir = cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| cwd.display().to_string());
+    format!("{workspace} - {dir}")
+}
+
+/// Native macOS menu bar (muda). Predefined items handle About/Hide/Quit
+/// through the standard responder chain, including the Cmd+Q accelerator.
+fn build_menu_bar() -> Option<Menu> {
+    let menu = Menu::new();
+    let about = AboutMetadata {
+        name: Some("Life OS Workbench".to_string()),
+        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        ..Default::default()
+    };
+    let app_menu = Submenu::new("Workbench", true);
+    let items: [&dyn muda::IsMenuItem; 5] = [
+        &PredefinedMenuItem::about(None, Some(about)),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::hide(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::quit(None),
+    ];
+    app_menu.append_items(&items).ok()?;
+    menu.append(&app_menu).ok()?;
+    #[cfg(target_os = "macos")]
+    menu.init_for_nsapp();
+    Some(menu)
+}
+
 struct GuiApp {
     window: Option<Arc<Window>>,
-    terminal: Option<Terminal<WgpuBackend<'static, 'static>>>,
+    terminal: Option<GpuTerminal>,
     /// Owned by `Option` so dispatch can move the immutable shell through
     /// `Shell::on_event` and put the successor back.
     shell: Option<Shell>,
     panes: PaneStore,
     modifiers: ModifiersState,
+    fonts: fonts::FontSet,
+    title: String,
+    _menu: Option<Menu>,
 }
 
 impl GuiApp {
-    fn font_size_px(window: &Window) -> u32 {
+    fn font_size_px(scale: f64) -> u32 {
         let pt = std::env::var("WORKBENCH_FONT_SIZE")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(DEFAULT_FONT_PT);
         // pt → CSS px (4/3) → device px.
-        ((pt * 4.0 / 3.0) * window.scale_factor()).round().max(8.0) as u32
+        ((pt * 4.0 / 3.0) * scale).round().max(8.0) as u32
+    }
+
+    fn padding_px(scale: f64) -> u32 {
+        (PADDING_LOGICAL * scale).round() as u32
+    }
+
+    fn build_fonts(&self, scale: f64) -> Fonts<'static> {
+        let mut f = Fonts::new(self.fonts.regular.clone(), Self::font_size_px(scale));
+        f.add_regular_fonts(self.fonts.fallbacks.iter().cloned());
+        f.add_bold_fonts(self.fonts.bold.iter().cloned());
+        f.add_italic_fonts(self.fonts.italic.iter().cloned());
+        f.add_bold_italic_fonts(self.fonts.bold_italic.iter().cloned());
+        f
     }
 
     fn redraw(&mut self) {
@@ -86,12 +153,37 @@ impl GuiApp {
             window.request_redraw();
         }
     }
+
+    fn inject_text(&mut self, text: &str, event_loop: &ActiveEventLoop) {
+        for ev in input::text_to_events(text) {
+            self.handle_event(&ev, event_loop);
+        }
+    }
+
+    fn paste_clipboard(&mut self, event_loop: &ActiveEventLoop) {
+        let text = arboard::Clipboard::new().and_then(|mut c| c.get_text());
+        if let Ok(text) = text {
+            self.inject_text(&text, event_loop);
+        }
+    }
+
+    fn open_dropped_file(&mut self, path: std::path::PathBuf) {
+        if !path.is_file() {
+            return;
+        }
+        if let Some(shell) = self.shell.take() {
+            self.shell = Some(shell.open_in_focused(path));
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
 }
 
 impl ApplicationHandler for GuiApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = WindowAttributes::default()
-            .with_title("Life OS Workbench")
+            .with_title(self.title.clone())
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 860.0));
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -101,27 +193,38 @@ impl ApplicationHandler for GuiApp {
                 return;
             }
         };
+        window.set_ime_allowed(true);
 
-        let (primary, fallbacks) = match fonts::load_fonts() {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("workbench: {e}");
-                event_loop.exit();
-                return;
-            }
-        };
-
+        let scale = window.scale_factor();
         let size = window.inner_size();
+        let pad = Self::padding_px(scale);
+        let bg = [
+            BG.rgb().0 as f32 / 255.0,
+            BG.rgb().1 as f32 / 255.0,
+            BG.rgb().2 as f32 / 255.0,
+            1.0,
+        ];
         let backend = pollster::block_on(
-            Builder::from_font(primary)
-                .with_fonts(fallbacks)
-                .with_font_size_px(Self::font_size_px(&window))
-                .with_bg_color(BG.resolve(ColorSupport::TrueColor))
-                .with_width_and_height(Dimensions {
-                    width: NonZeroU32::new(size.width.max(1)).unwrap(),
-                    height: NonZeroU32::new(size.height.max(1)).unwrap(),
-                })
-                .build_with_target(window.clone()),
+            Builder::<CenteredPostProcessor>::from_font_and_user_data(
+                self.fonts.regular.clone(),
+                bg,
+            )
+            .with_regular_fonts(self.fonts.fallbacks.iter().cloned())
+            .with_bold_fonts(self.fonts.bold.iter().cloned())
+            .with_italic_fonts(self.fonts.italic.iter().cloned())
+            .with_bold_italic_fonts(self.fonts.bold_italic.iter().cloned())
+            .with_font_size_px(Self::font_size_px(scale))
+            .with_fg_color(crate::theme::FG.resolve(ColorSupport::TrueColor))
+            .with_bg_color(BG.resolve(ColorSupport::TrueColor))
+            .with_viewport(Viewport::Shrink {
+                width: pad * 2,
+                height: pad * 2,
+            })
+            .with_width_and_height(Dimensions {
+                width: NonZeroU32::new(size.width.max(1)).unwrap(),
+                height: NonZeroU32::new(size.height.max(1)).unwrap(),
+            })
+            .build_with_target(window.clone()),
         );
         match backend
             .map_err(|e| e.to_string())
@@ -157,9 +260,28 @@ impl ApplicationHandler for GuiApp {
                     window.request_redraw();
                 }
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let fonts = self.build_fonts(scale_factor);
+                if let Some(terminal) = self.terminal.as_mut() {
+                    terminal.backend_mut().update_fonts(fonts);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::Ime(Ime::Commit(text)) => self.inject_text(&text, event_loop),
+            WindowEvent::DroppedFile(path) => self.open_dropped_file(path),
             WindowEvent::KeyboardInput { event: key, .. } => {
                 if key.state != ElementState::Pressed {
                     return;
+                }
+                if self.modifiers.super_key() {
+                    if let Key::Character(s) = &key.logical_key {
+                        if s.as_str().eq_ignore_ascii_case("v") {
+                            self.paste_clipboard(event_loop);
+                            return;
+                        }
+                    }
                 }
                 if let Some(ev) = input::translate_key(&key.logical_key, self.modifiers) {
                     self.handle_event(&ev, event_loop);

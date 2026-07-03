@@ -26,6 +26,10 @@ ratatui-wgpu = "0.4.1"
 winit = "0.30"
 fontdb = "0.23"
 pollster = "0.4"
+wgpu = "26"
+bytemuck = { version = "1", features = ["derive"] }
+muda = "0.19"
+arboard = "3"
 alacritty_terminal = "0.24"
 portable-pty = "0.8"
 helix-core = { git = "https://github.com/helix-editor/helix", tag = "25.07.1", version = "25.7.1" }

@@ -47,6 +47,11 @@ impl PaletteColor {
         }
     }
 
+    /// Raw truecolor components (used by the GPU host for shader uniforms).
+    pub const fn rgb(&self) -> (u8, u8, u8) {
+        self.rgb
+    }
+
     pub fn resolve(&self, support: ColorSupport) -> Color {
         match support {
             ColorSupport::TrueColor => Color::Rgb(self.rgb.0, self.rgb.1, self.rgb.2),
