@@ -97,6 +97,8 @@ impl PaneStore {
                             .map(|api| SearchPane::new(api.clone(), None));
                     }
                 }
+                // Welcome panes hold no OS resources until a desire lands.
+                Some(PaneDesire::Welcome) => {}
                 _ => {
                     if entry.term.is_none() {
                         entry.term = TermPane::spawn(None, cols, rows).ok();

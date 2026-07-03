@@ -77,19 +77,20 @@ Modals, destructive confirms, and gates escalate to a `double` border in `error`
 
 Rendering is **ratatui** widgets driven by the same Life OS module manifests (`view.kind`). Component ↔ manifest mapping:
 
-1. **Pane / tiling shell** — the Zellij-model container; every surface (terminal, editor, agent, any Life OS view) is a bordered pane. Focused pane = Level 2.
-2. **List / Table** (`view.kind: list|table`) — dense one-line rows; `reverse` on the cursor row; column headers in `bold`+`fg-dim`; sort/filter via the command palette.
-3. **Board** (`view.kind: board`) — Kanban as side-by-side bordered column-panes; cards are one/two-line list items; lifecycle status = column.
-4. **Calendar** (`view.kind: calendar`) — a cell-grid; day cells show count badges; today in `accent`.
-5. **Detail** (`view.kind: detail`) — a stacked field pane (`label: value`, labels `fg-dim`) + a styled-markdown body region.
-6. **Timeline / scrubber** (`view.kind: timeline`) — a horizontal bar with a movable cursor; also the Mirrorscope replay scrubber (arrows scrub, Enter = `jumpToEvent`).
-7. **Tree** — async task tree (Mirrorscope logical stack), file tree, entity hierarchy; indent + box-drawing branches.
-8. **Charts** — `Sparkline`/`BarChart`/`Chart` for equity curves, token/cost meters, poll-timing; functional, not decorative.
-9. **Command palette** — a centered `double`-bordered modal, fuzzy-filtered list; the universal command bar (replaces the web CommandBar).
-10. **Statusline** — the single reserved bottom line: `mode · cwd · workspace · agent state · debug/replay state`.
-11. **Gallery** (`view.kind: gallery`) — thumbnail grid rendered via **terminal graphics protocol** (Kitty/Sixel/iTerm2); falls back to a filename+metadata list where the protocol is unavailable.
-12. **Graph** (`view.kind: graph`) — small graphs as box-drawing node-link/indented trees; large graphs route to the **external-viewer escape hatch** (not forced into the grid).
-13. **Diff / apply layer** — agent edits (ACP) and VCS diffs shown inline: added `success`, removed `error`, hunks accept/reject with the cursor.
+1. **Workspace chrome** — Zed-model IDE frame around the pane tree: a one-line clickable **tab bar** on top, a persistent **file sidebar** (left, toggleable, keyboard `alt+f`), the editor-first **center pane tree**, an integrated **terminal dock** along the bottom (`alt+j`; its shell session survives hiding), and the statusline. Fully mouse-driven: click focuses any region or pane and places the editor cursor, the wheel scrolls whatever is under it (editor, terminal scrollback, lists, modals), modal rows activate on click. Center panes with nothing open render the **welcome surface** (keybinding hints).
+2. **Pane / tiling shell** — the Zellij-model container inside the chrome; every surface (terminal, editor, agent, any Life OS view) is a bordered pane. Focused pane = Level 2.
+3. **List / Table** (`view.kind: list|table`) — dense one-line rows; `reverse` on the cursor row; column headers in `bold`+`fg-dim`; sort/filter via the command palette.
+4. **Board** (`view.kind: board`) — Kanban as side-by-side bordered column-panes; cards are one/two-line list items; lifecycle status = column.
+5. **Calendar** (`view.kind: calendar`) — a cell-grid; day cells show count badges; today in `accent`.
+6. **Detail** (`view.kind: detail`) — a stacked field pane (`label: value`, labels `fg-dim`) + a styled-markdown body region.
+7. **Timeline / scrubber** (`view.kind: timeline`) — a horizontal bar with a movable cursor; also the Mirrorscope replay scrubber (arrows scrub, Enter = `jumpToEvent`).
+8. **Tree** — async task tree (Mirrorscope logical stack), file tree, entity hierarchy; indent + box-drawing branches.
+9. **Charts** — `Sparkline`/`BarChart`/`Chart` for equity curves, token/cost meters, poll-timing; functional, not decorative.
+10. **Command palette** — a centered `double`-bordered modal, fuzzy-filtered list; the universal command bar (replaces the web CommandBar).
+11. **Statusline** — the single reserved bottom line: `mode · cwd · workspace · agent state · debug/replay state`.
+12. **Gallery** (`view.kind: gallery`) — thumbnail grid rendered via **terminal graphics protocol** (Kitty/Sixel/iTerm2); falls back to a filename+metadata list where the protocol is unavailable.
+13. **Graph** (`view.kind: graph`) — small graphs as box-drawing node-link/indented trees; large graphs route to the **external-viewer escape hatch** (not forced into the grid).
+14. **Diff / apply layer** — agent edits (ACP) and VCS diffs shown inline: added `success`, removed `error`, hunks accept/reject with the cursor.
 
 ## Degradation & escape hatches (honest limits)
 

@@ -118,7 +118,7 @@ What this buys:
                     └──────────────────────┘
 ```
 
-- **Terminal** - `alacritty_terminal` (VTE parsing) over `portable-pty`. A pane is a real terminal by default; one keybind flips it into any other mode. "Switchable with a terminal" is the _native state_, not a feature.
+- **Terminal** - `alacritty_terminal` (VTE parsing) over `portable-pty`. A real terminal lives in an integrated bottom dock (one keybind or click away, session survives hiding), and any center pane can become one. "An IDE that perfectly joins with the terminal" is the _native state_, not a feature.
 - **Editor** - embed **Helix** core (`helix-core`/`helix-view`): rope buffer, multi-selection, tree-sitter highlighting, built-in LSP, zero config. We do **not** write an editor.
 - **Agent** - an **ACP (Agent Client Protocol)** client. Claude Code / the existing harness / any ACP agent plugs in interchangeably. Agent edits land in the buffer as a reviewable diff layer (accept/reject inline). We do **not** write a model.
 - **Life OS** - the TUI renderer backend from [§2.1](#21-frontend-react-spa--tui-renderers-over-the-same-manifests), driven by `lifeos-api` in-process.

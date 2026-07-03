@@ -1,16 +1,18 @@
-//! The interactive shell: renders the tiling layout, statusline, command
-//! palette, file tree, and fuzzy picker with the Terminal Brutalism theme,
-//! and routes key events to chords, modals, or the focused pane (terminal
-//! or editor). Pane content lives in the `PaneStore`; everything here is
-//! cloneable value-state.
+//! The interactive shell: renders the IDE workspace chrome (tab bar, file
+//! sidebar, editor center, terminal dock, statusline), the command palette,
+//! and the fuzzy picker with the Terminal Brutalism theme, and routes key
+//! events to chords, modals, the sidebar, or the focused pane. Pane content
+//! lives in the `PaneStore`; everything here is cloneable value-state.
 
 use crate::file_tree::{FileTree, PickerAction, PickerState, TreeAction};
 use crate::layout::{Layout, PaneId, SplitDir};
 use crate::palette::{CommandId, Keymap, PaletteState};
 use crate::pane_store::PaneStore;
 use crate::theme::{self, StatuslineState, Theme};
+use crate::workspace::{self, Chrome, Region, DOCK_PANE};
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 use std::collections::HashMap;
@@ -19,6 +21,8 @@ use std::path::PathBuf;
 /// What the pane should show; the `PaneStore` reconciles toward this.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneDesire {
+    /// Empty editor surface: keybinding hints until something opens.
+    Welcome,
     Terminal,
     Editor(PathBuf),
     Agent,
@@ -35,8 +39,10 @@ pub struct Shell {
     pub status: StatuslineState,
     pub running: bool,
     pub desires: HashMap<PaneId, PaneDesire>,
+    /// The persistent file sidebar; `None` = collapsed.
     pub tree: Option<FileTree>,
     pub picker: Option<PickerState>,
+    pub chrome: Chrome,
 }
 
 impl Shell {
@@ -44,6 +50,9 @@ impl Shell {
         let cwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "?".into());
+        let mut desires = HashMap::new();
+        desires.insert(0, PaneDesire::Welcome);
+        desires.insert(DOCK_PANE, PaneDesire::Terminal);
         Self {
             layout: Layout::new(),
             palette: PaletteState::default(),
@@ -51,14 +60,15 @@ impl Shell {
             theme,
             status: StatuslineState {
                 mode: "SHELL".into(),
-                cwd,
+                cwd: cwd.clone(),
                 workspace,
                 ..Default::default()
             },
             running: true,
-            desires: HashMap::new(),
-            tree: None,
+            desires,
+            tree: Some(FileTree::open(&PathBuf::from(cwd))),
             picker: None,
+            chrome: Chrome::default(),
         }
     }
 
@@ -66,15 +76,24 @@ impl Shell {
         PathBuf::from(&self.status.cwd)
     }
 
+    /// The pane that keyboard input lands in: the dock when it has focus,
+    /// otherwise the layout's focused center pane.
+    pub fn effective_focused_pane(&self) -> PaneId {
+        match self.chrome.focus {
+            Region::Dock => DOCK_PANE,
+            _ => self.layout.tab().focused,
+        }
+    }
+
     pub fn focused_desire(&self) -> PaneDesire {
         self.desires
-            .get(&self.layout.tab().focused)
+            .get(&self.effective_focused_pane())
             .cloned()
-            .unwrap_or(PaneDesire::Terminal)
+            .unwrap_or(PaneDesire::Welcome)
     }
 
     fn any_modal_open(&self) -> bool {
-        self.palette.open || self.tree.is_some() || self.picker.is_some()
+        self.palette.open || self.picker.is_some()
     }
 
     /// Apply one terminal event, returning the next state.
@@ -102,19 +121,6 @@ impl Shell {
                 None => next,
             };
         }
-        if let Some(tree) = &self.tree {
-            let (tree, action) = tree.on_key(*code);
-            let mut next = Shell {
-                tree: Some(tree),
-                ..self.clone()
-            };
-            match action {
-                TreeAction::Close => next.tree = None,
-                TreeAction::OpenFile(path) => return next.open_in_focused(path),
-                TreeAction::None => {}
-            }
-            return next;
-        }
         if let Some(picker) = &self.picker {
             let (picker, action) = picker.on_key(*code);
             let mut next = Shell {
@@ -128,25 +134,42 @@ impl Shell {
             }
             return next;
         }
-        match self.keymap.lookup(*code, *modifiers) {
-            Some(cmd) => self.run_command(cmd),
-            None => self.clone(),
+        if let Some(cmd) = self.keymap.lookup(*code, *modifiers) {
+            return self.run_command(cmd);
         }
+        // The sidebar owns plain keys while focused (j/k/enter navigation).
+        if self.chrome.focus == Region::Sidebar {
+            if let Some(tree) = &self.tree {
+                let (tree, action) = tree.on_key(*code);
+                let mut next = Shell {
+                    tree: Some(tree),
+                    ..self.clone()
+                };
+                match action {
+                    TreeAction::Close => next.chrome.focus = Region::Center,
+                    TreeAction::OpenFile(path) => return next.open_in_focused(path),
+                    TreeAction::None => {}
+                }
+                return next;
+            }
+        }
+        self.clone()
     }
 
-    /// Open a file in the focused pane's editor, closing any modal.
-    /// Public so the window host can route drag-and-dropped files here.
+    /// Open a file in the focused center pane's editor, closing any modal
+    /// and pulling focus into the editor (Zed behavior). Public so the
+    /// window host can route drag-and-dropped files here.
     pub fn open_in_focused(&self, path: PathBuf) -> Shell {
         let mut next = self.clone();
-        next.tree = None;
         next.picker = None;
+        next.chrome.focus = Region::Center;
         next.desires
             .insert(self.layout.tab().focused, PaneDesire::Editor(path));
         next
     }
 
-    /// True when a key press belongs to the focused pane (terminal or
-    /// editor) rather than a chord or an open modal.
+    /// True when a key press belongs to the focused pane (terminal, editor,
+    /// dock, ...) rather than a chord, an open modal, or the sidebar.
     pub fn forwards_to_pane(&self, event: &Event) -> bool {
         let Event::Key(KeyEvent {
             code,
@@ -159,6 +182,8 @@ impl Shell {
         };
         *kind == KeyEventKind::Press
             && !self.any_modal_open()
+            && self.chrome.focus != Region::Sidebar
+            && self.focused_desire() != PaneDesire::Welcome
             && self.keymap.lookup(*code, *modifiers).is_none()
     }
 
@@ -166,100 +191,222 @@ impl Shell {
         let mut next = self.clone();
         match cmd {
             CommandId::SplitHorizontal => {
-                next.layout = self.layout.split_focused(SplitDir::Horizontal).0
+                let (layout, pane) = self.layout.split_focused(SplitDir::Horizontal);
+                next.layout = layout;
+                next.desires.insert(pane, PaneDesire::Welcome);
+                next.chrome.focus = Region::Center;
             }
             CommandId::SplitVertical => {
-                next.layout = self.layout.split_focused(SplitDir::Vertical).0
+                let (layout, pane) = self.layout.split_focused(SplitDir::Vertical);
+                next.layout = layout;
+                next.desires.insert(pane, PaneDesire::Welcome);
+                next.chrome.focus = Region::Center;
             }
             CommandId::ClosePane => match self.layout.close_focused() {
                 Some(layout) => next.layout = layout,
                 None => next.running = false,
             },
+            CommandId::FocusNext | CommandId::FocusPrev if self.chrome.focus != Region::Center => {
+                next.chrome.focus = Region::Center;
+            }
             CommandId::FocusNext => next.layout = self.layout.focus_next(),
             CommandId::FocusPrev => next.layout = self.layout.focus_prev(),
-            CommandId::NewTab => next.layout = self.layout.new_tab().0,
+            CommandId::NewTab => {
+                let (layout, pane) = self.layout.new_tab();
+                next.layout = layout;
+                next.desires.insert(pane, PaneDesire::Welcome);
+                next.chrome.focus = Region::Center;
+            }
             CommandId::NextTab => next.layout = self.layout.next_tab(),
             CommandId::OpenPalette => next.palette = PaletteState::open(),
             CommandId::ToggleEditor => {
                 let focused = self.layout.tab().focused;
-                match self.focused_desire() {
-                    PaneDesire::Editor(_) => {
+                next.chrome.focus = Region::Center;
+                match self.desires.get(&focused) {
+                    Some(PaneDesire::Editor(_)) => {
                         next.desires.insert(focused, PaneDesire::Terminal);
                     }
                     // No file yet: the picker chooses one, sharing the cwd.
-                    PaneDesire::Terminal | PaneDesire::Agent | PaneDesire::Search => {
-                        next.picker = Some(PickerState::open(&self.cwd_path()));
-                    }
+                    _ => next.picker = Some(PickerState::open(&self.cwd_path())),
                 }
+            }
+            CommandId::TerminalHere => {
+                next.desires
+                    .insert(self.layout.tab().focused, PaneDesire::Terminal);
+                next.chrome.focus = Region::Center;
             }
             CommandId::OpenAgentPane => {
                 next.desires
                     .insert(self.layout.tab().focused, PaneDesire::Agent);
+                next.chrome.focus = Region::Center;
             }
             CommandId::OpenSearchPane => {
                 next.desires
                     .insert(self.layout.tab().focused, PaneDesire::Search);
+                next.chrome.focus = Region::Center;
             }
-            CommandId::OpenFileTree => next.tree = Some(FileTree::open(&self.cwd_path())),
+            CommandId::ToggleSidebar => match &self.tree {
+                Some(_) => {
+                    next.tree = None;
+                    if next.chrome.focus == Region::Sidebar {
+                        next.chrome.focus = Region::Center;
+                    }
+                }
+                None => {
+                    next.tree = Some(FileTree::open(&self.cwd_path()));
+                    next.chrome.focus = Region::Sidebar;
+                }
+            },
+            CommandId::ToggleDock => {
+                next.chrome.dock_open = !self.chrome.dock_open;
+                next.chrome.focus = if next.chrome.dock_open {
+                    Region::Dock
+                } else {
+                    Region::Center
+                };
+            }
             CommandId::OpenFilePicker => next.picker = Some(PickerState::open(&self.cwd_path())),
             CommandId::Quit => next.running = false,
         }
         next
     }
 
-    /// The pane rectangles for the active tab, given the full frame area
-    /// (bottom line reserved for the statusline).
+    /// The chrome rectangles for a frame (sidebar/dock reflect actual state).
+    pub fn chrome_rects(&self, area: Rect) -> Option<workspace::ChromeRects> {
+        workspace::chrome_rects(area, self.tree.is_some(), self.chrome.dock_open)
+    }
+
+    /// The pane rectangles the `PaneStore` reconciles against: the active
+    /// tab's center panes plus the terminal dock. The dock entry is present
+    /// even while hidden so its shell session survives toggling.
     pub fn pane_rects(&self, area: Rect) -> Vec<(PaneId, Rect)> {
-        if area.height < 2 {
+        let Some(cr) = self.chrome_rects(area) else {
             return Vec::new();
-        }
-        let body = Rect {
-            height: area.height - 1,
-            ..area
         };
-        self.layout.tab().root.rects(body)
+        let mut rects = self.layout.tab().root.rects(cr.center);
+        let dock = cr
+            .dock
+            .or_else(|| workspace::chrome_rects(area, self.tree.is_some(), true)?.dock);
+        if let Some(rect) = dock {
+            rects.push((DOCK_PANE, rect));
+        }
+        rects
     }
 
     pub fn draw(&self, frame: &mut Frame, panes: &mut PaneStore) {
         let area = frame.area();
-        if area.height < 2 {
+        let Some(cr) = self.chrome_rects(area) else {
             return;
-        }
-        let body = Rect {
-            height: area.height - 1,
-            ..area
-        };
-        let status_row = Rect {
-            y: area.y + body.height,
-            height: 1,
-            ..area
         };
 
+        self.draw_tab_bar(frame, cr.tab_bar);
+        if let (Some(tree), Some(rect)) = (&self.tree, cr.sidebar) {
+            self.draw_sidebar(frame, tree, rect);
+        }
+
         let tab = self.layout.tab();
-        for (pane, rect) in tab.root.rects(body) {
-            self.draw_pane(frame, panes, pane, rect, pane == tab.focused);
+        for (pane, rect) in tab.root.rects(cr.center) {
+            let focused = self.chrome.focus == Region::Center && pane == tab.focused;
+            self.draw_pane(frame, panes, pane, rect, focused);
+        }
+        if let Some(rect) = cr.dock {
+            self.draw_pane(
+                frame,
+                panes,
+                DOCK_PANE,
+                rect,
+                self.chrome.focus == Region::Dock,
+            );
         }
 
         let mut status = self.status.clone();
-        if let PaneDesire::Editor(_) = self.focused_desire() {
-            if let Some(editor) = panes.editor(tab.focused) {
-                status.mode = editor.status();
-            }
-        }
+        status.mode = match self.chrome.focus {
+            Region::Sidebar => "FILES".into(),
+            Region::Dock => "TERMINAL".into(),
+            Region::Center => match self.focused_desire() {
+                PaneDesire::Editor(_) => panes
+                    .editor(tab.focused)
+                    .map(|e| e.status())
+                    .unwrap_or_else(|| "EDITOR".into()),
+                PaneDesire::Terminal => "TERMINAL".into(),
+                PaneDesire::Agent => "AGENT".into(),
+                PaneDesire::Search => "RECALL".into(),
+                PaneDesire::Welcome => "SHELL".into(),
+            },
+        };
         if let Some(agent) = panes.agent(tab.focused) {
             status.agent = agent.status();
         }
         frame.render_widget(
             Paragraph::new(theme::statusline(&self.theme, &status)),
-            status_row,
+            cr.status,
         );
 
         if self.palette.open {
             self.draw_palette(frame, area);
         }
-        if self.tree.is_some() || self.picker.is_some() {
+        if self.picker.is_some() {
             self.draw_files_modal(frame, area);
         }
+    }
+
+    fn draw_tab_bar(&self, frame: &mut Frame, rect: Rect) {
+        let spans: Vec<ratatui::text::Span> = workspace::tab_bar_items(&self.layout)
+            .into_iter()
+            .map(|(label, hit)| {
+                let style = match hit {
+                    workspace::TabHit::Tab(i) if i == self.layout.active_tab => {
+                        self.theme.active_item()
+                    }
+                    _ => self.theme.muted(),
+                };
+                ratatui::text::Span::styled(label, style)
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(Line::from(spans)), rect);
+    }
+
+    fn draw_sidebar(&self, frame: &mut Frame, tree: &FileTree, rect: Rect) {
+        let focused = self.chrome.focus == Region::Sidebar;
+        let (border_style, border_set) = if focused {
+            self.theme.border_focus()
+        } else {
+            self.theme.border_inactive()
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(border_set)
+            .border_style(border_style)
+            .title(" files ");
+        let height = rect.height.saturating_sub(2) as usize;
+        let scroll = workspace::scroll_offset(tree.selected, height);
+        let rows: Vec<ListItem> = tree
+            .rows()
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(height)
+            .map(|(i, r)| {
+                let name = r.path.file_name().map(|n| n.to_string_lossy().to_string());
+                let glyph = match (r.is_dir, r.expanded) {
+                    (true, true) => "▾ ",
+                    (true, false) => "▸ ",
+                    _ => "  ",
+                };
+                let label = format!(
+                    "{}{glyph}{}",
+                    "  ".repeat(r.depth),
+                    name.unwrap_or_default()
+                );
+                let style = if i == tree.selected {
+                    self.theme.active_item()
+                } else {
+                    self.theme.text()
+                };
+                ListItem::new(label).style(style)
+            })
+            .collect();
+        frame.render_widget(List::new(rows).block(block), rect);
     }
 
     fn draw_pane(
@@ -287,9 +434,11 @@ impl Shell {
                     .map(|n| n.to_string_lossy())
                     .unwrap_or_default()
             ),
-            PaneDesire::Terminal => format!(" pane {pane} "),
+            PaneDesire::Terminal if pane == DOCK_PANE => " terminal ".to_string(),
+            PaneDesire::Terminal => format!(" terminal {pane} "),
             PaneDesire::Agent => " agent ".to_string(),
             PaneDesire::Search => " recall ".to_string(),
+            PaneDesire::Welcome => " welcome ".to_string(),
         };
         let block = Block::default()
             .borders(Borders::ALL)
@@ -324,6 +473,22 @@ impl Shell {
                     .style(self.theme.muted())
                     .block(block),
             },
+            PaneDesire::Welcome => {
+                let hints = workspace::welcome_lines();
+                let pad = inner_height.saturating_sub(hints.len()) / 2;
+                let mut lines: Vec<Line> = vec![Line::default(); pad];
+                lines.extend(hints.into_iter().map(|(text, emphasized)| {
+                    let style = if emphasized {
+                        self.theme.title()
+                    } else {
+                        self.theme.muted()
+                    };
+                    Line::styled(text, style)
+                }));
+                Paragraph::new(lines)
+                    .alignment(Alignment::Center)
+                    .block(block)
+            }
         };
         frame.render_widget(widget, rect);
 
@@ -358,7 +523,9 @@ impl Shell {
         }
     }
 
-    fn modal_rect(&self, area: Rect) -> Rect {
+    /// The centered modal rectangle (palette / files). `pub(crate)` so the
+    /// mouse router can hit-test clicks against the same geometry.
+    pub(crate) fn modal_rect(&self, area: Rect) -> Rect {
         let width = (area.width * 6 / 10).clamp(20, 72).min(area.width);
         let height = 16.min(area.height);
         Rect {
@@ -398,27 +565,8 @@ impl Shell {
     fn draw_files_modal(&self, frame: &mut Frame, area: Rect) {
         let modal = self.modal_rect(area);
         let (style, set) = self.theme.border_emphasis();
-        let (title, items, selected) = if let Some(tree) = &self.tree {
-            let items: Vec<String> = tree
-                .rows()
-                .iter()
-                .map(|r| {
-                    let name = r.path.file_name().map(|n| n.to_string_lossy().to_string());
-                    let glyph = match (r.is_dir, r.expanded) {
-                        (true, true) => "▾ ",
-                        (true, false) => "▸ ",
-                        _ => "  ",
-                    };
-                    format!(
-                        "{}{glyph}{}",
-                        "  ".repeat(r.depth),
-                        name.unwrap_or_default()
-                    )
-                })
-                .collect();
-            (" files ".to_string(), items, tree.selected)
-        } else if let Some(picker) = &self.picker {
-            let items = picker.matches().into_iter().map(|(rel, _)| rel).collect();
+        let (title, items, selected) = if let Some(picker) = &self.picker {
+            let items: Vec<String> = picker.matches().into_iter().map(|(rel, _)| rel).collect();
             (format!(" ▸ {} ", picker.query), items, picker.selected)
         } else {
             return;
@@ -515,11 +663,59 @@ mod tests {
     }
 
     #[test]
-    fn file_tree_modal_opens_and_closes() {
-        let s = shell().on_event(&key(KeyCode::Char('f'), KeyModifiers::ALT));
+    fn sidebar_toggles_and_owns_plain_keys_while_focused() {
+        let s = shell();
+        assert!(s.tree.is_some(), "sidebar starts open");
+        let s = s.on_event(&key(KeyCode::Char('f'), KeyModifiers::ALT));
+        assert!(s.tree.is_none(), "alt+f collapses it");
+        let s = s.on_event(&key(KeyCode::Char('f'), KeyModifiers::ALT));
         assert!(s.tree.is_some());
+        assert_eq!(s.chrome.focus, Region::Sidebar, "reopening focuses it");
         assert!(!s.forwards_to_pane(&key(KeyCode::Char('j'), KeyModifiers::NONE)));
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(s.tree.as_ref().unwrap().selected, 1, "j moves selection");
         let s = s.on_event(&key(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(s.tree.is_none());
+        assert_eq!(s.chrome.focus, Region::Center, "esc returns to center");
+        assert!(s.tree.is_some(), "esc does not collapse the sidebar");
+    }
+
+    #[test]
+    fn dock_toggles_and_takes_keyboard_focus() {
+        let s = shell();
+        assert!(s.chrome.dock_open, "terminal dock starts open");
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT));
+        assert!(!s.chrome.dock_open);
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT));
+        assert!(s.chrome.dock_open);
+        assert_eq!(s.chrome.focus, Region::Dock);
+        assert_eq!(s.focused_desire(), PaneDesire::Terminal);
+        assert!(
+            s.forwards_to_pane(&key(KeyCode::Char('l'), KeyModifiers::NONE)),
+            "dock focus forwards typing to the dock terminal"
+        );
+        assert_eq!(s.effective_focused_pane(), DOCK_PANE);
+    }
+
+    #[test]
+    fn center_starts_as_welcome_and_swallows_plain_keys() {
+        let s = shell();
+        assert_eq!(s.chrome.focus, Region::Center);
+        assert_eq!(s.focused_desire(), PaneDesire::Welcome);
+        assert!(!s.forwards_to_pane(&key(KeyCode::Char('j'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn pane_rects_include_the_dock_even_while_hidden() {
+        let s = shell();
+        let area = Rect::new(0, 0, 120, 40);
+        let rects = s.pane_rects(area);
+        assert!(rects.iter().any(|(id, _)| *id == DOCK_PANE));
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT));
+        assert!(!s.chrome.dock_open);
+        let rects = s.pane_rects(area);
+        assert!(
+            rects.iter().any(|(id, _)| *id == DOCK_PANE),
+            "hidden dock keeps its pane alive (shell session survives)"
+        );
     }
 }

@@ -10,6 +10,7 @@
 
 pub mod fonts;
 pub mod input;
+pub mod mouse;
 pub mod postprocess;
 
 use std::num::NonZeroU32;
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use muda::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+use ratatui::backend::Backend;
 use ratatui::Terminal;
 use ratatui_wgpu::{Builder, Dimensions, Fonts, Viewport, WgpuBackend};
 use winit::application::ApplicationHandler;
@@ -55,8 +57,10 @@ pub fn run_gui(api: InProcessApi, workspace: String) -> Result<(), String> {
         )),
         panes: PaneStore::new(&cwd, Some(api)),
         modifiers: ModifiersState::empty(),
+        mouse: mouse::MouseTracker::default(),
         fonts,
         title: window_title(&workspace, &cwd),
+        warmup_frames: 2,
         _menu: build_menu_bar(),
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())
@@ -102,8 +106,11 @@ struct GuiApp {
     shell: Option<Shell>,
     panes: PaneStore,
     modifiers: ModifiersState,
+    mouse: mouse::MouseTracker,
     fonts: fonts::FontSet,
     title: String,
+    /// Full-repaint countdown for the first frames (cold glyph atlas).
+    warmup_frames: u8,
     _menu: Option<Menu>,
 }
 
@@ -134,15 +141,56 @@ impl GuiApp {
         let (Some(terminal), Some(shell)) = (self.terminal.as_mut(), self.shell.as_ref()) else {
             return;
         };
+        // Warmup repaints: the first full rasterization drops glyphs while
+        // the atlas is cold (ratatui-wgpu 0.4.1, tracked in issue #54), and
+        // cells that never change again would keep the holes forever. Clear
+        // for the first two frames so frame two re-renders everything
+        // against the warm atlas.
+        if self.warmup_frames > 0 {
+            self.warmup_frames -= 1;
+            let _ = terminal.clear();
+        }
         let area = terminal.get_frame().area();
         self.panes.sync(&shell.pane_rects(area), &shell.desires);
         let panes = &mut self.panes;
         let _ = terminal.draw(|frame| shell.draw(frame, panes));
     }
 
+    /// The grid geometry needed for pixel→cell mapping: (cols, rows,
+    /// text-region px width, height) from the live backend.
+    fn grid_metrics(&mut self) -> Option<(u16, u16, u16, u16)> {
+        let ws = self.terminal.as_mut()?.backend_mut().window_size().ok()?;
+        Some((
+            ws.columns_rows.width,
+            ws.columns_rows.height,
+            ws.pixels.width,
+            ws.pixels.height,
+        ))
+    }
+
+    fn cell_at(&mut self, px: f64, py: f64) -> Option<(u16, u16)> {
+        let size = self.window.as_ref()?.inner_size();
+        let (cols, rows, rw, rh) = self.grid_metrics()?;
+        Some(mouse::cell_at(
+            px,
+            py,
+            size.width,
+            size.height,
+            cols,
+            rows,
+            rw,
+            rh,
+        ))
+    }
+
     fn handle_event(&mut self, ev: &crossterm::event::Event, event_loop: &ActiveEventLoop) {
         if let Some(shell) = self.shell.take() {
-            let next = driver::dispatch(shell, &mut self.panes, ev);
+            let area = self
+                .terminal
+                .as_mut()
+                .map(|t| t.get_frame().area())
+                .unwrap_or_default();
+            let next = driver::dispatch(shell, &mut self.panes, ev, area);
             let running = next.running;
             self.shell = Some(next);
             if !running {
@@ -237,8 +285,10 @@ impl ApplicationHandler for GuiApp {
                 return;
             }
         }
+        // No eager draw here: the surface has never presented yet, and cells
+        // drawn now would be diffed away. The first RedrawRequested paints.
+        window.request_redraw();
         self.window = Some(window);
-        self.redraw();
     }
 
     fn window_event(
@@ -271,6 +321,38 @@ impl ApplicationHandler for GuiApp {
             }
             WindowEvent::Ime(Ime::Commit(text)) => self.inject_text(&text, event_loop),
             WindowEvent::DroppedFile(path) => self.open_dropped_file(path),
+            WindowEvent::CursorMoved { position, .. } => {
+                let mods = input::to_modifiers(self.modifiers);
+                if let Some(cell) = self.cell_at(position.x, position.y) {
+                    if let Some(ev) = self.mouse.moved(cell, mods) {
+                        self.handle_event(&ev, event_loop);
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let mods = input::to_modifiers(self.modifiers);
+                let pressed = state == ElementState::Pressed;
+                if let Some(ev) = self.mouse.input(button, pressed, mods) {
+                    self.handle_event(&ev, event_loop);
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let mods = input::to_modifiers(self.modifiers);
+                let lines = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y as f64,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        // Convert trackpad pixels to lines via the cell height.
+                        let cell_h = self
+                            .grid_metrics()
+                            .map(|(_, rows, _, rh)| rh.max(1) as f64 / rows.max(1) as f64)
+                            .unwrap_or(16.0);
+                        pos.y / cell_h
+                    }
+                };
+                for ev in self.mouse.wheel(lines, mods) {
+                    self.handle_event(&ev, event_loop);
+                }
+            }
             WindowEvent::KeyboardInput { event: key, .. } => {
                 if key.state != ElementState::Pressed {
                     return;

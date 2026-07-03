@@ -230,9 +230,33 @@ impl Layout {
         )
     }
 
+    /// Focus a specific pane of the active tab (mouse click). Unchanged if
+    /// the pane is not in this tab.
+    pub fn focus_pane(&self, pane: PaneId) -> Layout {
+        let tab = self.tab();
+        if !tab.root.panes().contains(&pane) {
+            return self.clone();
+        }
+        self.with_tab(
+            Tab {
+                root: tab.root.clone(),
+                focused: pane,
+            },
+            self.next_pane,
+        )
+    }
+
     pub fn next_tab(&self) -> Layout {
         Layout {
             active_tab: (self.active_tab + 1) % self.tabs.len(),
+            ..self.clone()
+        }
+    }
+
+    /// Jump straight to a tab (tab-bar click); out-of-range clamps.
+    pub fn switch_tab(&self, index: usize) -> Layout {
+        Layout {
+            active_tab: index.min(self.tabs.len() - 1),
             ..self.clone()
         }
     }
@@ -302,6 +326,15 @@ mod tests {
             .map(|(_, r)| r.width as u32 * r.height as u32)
             .sum();
         assert_eq!(total, 80 * 24);
+    }
+
+    #[test]
+    fn focus_pane_targets_a_specific_pane_and_ignores_strangers() {
+        let (layout, _) = Layout::new().split_focused(SplitDir::Horizontal);
+        let layout = layout.focus_pane(0);
+        assert_eq!(layout.tab().focused, 0);
+        let layout = layout.focus_pane(999);
+        assert_eq!(layout.tab().focused, 0, "unknown pane leaves focus alone");
     }
 
     #[test]

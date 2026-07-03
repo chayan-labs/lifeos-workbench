@@ -101,23 +101,23 @@ fn main() {
 
 fn run_tui(api: InProcessApi) -> std::io::Result<()> {
     let mut terminal = ratatui::init();
+    let _ = crossterm::execute!(std::io::stdout(), event::EnableMouseCapture);
     let theme = Theme::new(ColorSupport::detect());
     let mut shell = Shell::new(theme, DEFAULT_WORKSPACE.to_string());
     let mut panes = PaneStore::new(&std::env::current_dir().unwrap_or_default(), Some(api));
     let result = (|| -> std::io::Result<()> {
         while shell.running {
-            panes.sync(
-                &shell.pane_rects(terminal.get_frame().area()),
-                &shell.desires,
-            );
+            let area = terminal.get_frame().area();
+            panes.sync(&shell.pane_rects(area), &shell.desires);
             terminal.draw(|frame| shell.draw(frame, &mut panes))?;
             if event::poll(Duration::from_millis(50))? {
                 let ev = event::read()?;
-                shell = driver::dispatch(shell, &mut panes, &ev);
+                shell = driver::dispatch(shell, &mut panes, &ev, area);
             }
         }
         Ok(())
     })();
+    let _ = crossterm::execute!(std::io::stdout(), event::DisableMouseCapture);
     ratatui::restore();
     result
 }

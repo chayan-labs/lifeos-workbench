@@ -1,9 +1,9 @@
 //! Embedded terminal pane: a real shell over `portable-pty`, parsed by the
-//! `alacritty_terminal` VTE, rendered into a ratatui buffer. A pane is a
-//! terminal by default - this is the native state of the shell.
+//! `alacritty_terminal` VTE, rendered into a ratatui buffer. One lives in
+//! the workspace's bottom dock; any center pane can become one on demand.
 
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{cell::Flags, Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Processor};
@@ -122,11 +122,31 @@ impl TermPane {
     }
 
     /// Forward a key press to the child as the bytes a terminal would send.
+    /// Typing snaps any scrollback view back to the live bottom.
     pub fn send_key(&mut self, key: &KeyEvent) {
-        let app_cursor = self.term.lock().mode().contains(TermMode::APP_CURSOR);
+        let app_cursor = {
+            let mut term = self.term.lock();
+            term.scroll_display(Scroll::Bottom);
+            term.mode().contains(TermMode::APP_CURSOR)
+        };
         if let Some(bytes) = encode_key(key, app_cursor) {
             let _ = self.writer.write_all(&bytes);
             let _ = self.writer.flush();
+        }
+    }
+
+    /// Mouse wheel: scroll the scrollback on the primary screen; full-screen
+    /// apps (alternate screen) get arrow keys instead, the terminal idiom.
+    pub fn on_scroll(&mut self, down: bool) {
+        let on_alt_screen = self.term.lock().mode().contains(TermMode::ALT_SCREEN);
+        if on_alt_screen {
+            let code = if down { KeyCode::Down } else { KeyCode::Up };
+            for _ in 0..3 {
+                self.send_key(&KeyEvent::new(code, KeyModifiers::NONE));
+            }
+        } else {
+            let delta = if down { -3 } else { 3 };
+            self.term.lock().scroll_display(Scroll::Delta(delta));
         }
     }
 
@@ -339,6 +359,27 @@ mod tests {
         let mut pane = TermPane::spawn(Some(cmd), 80, 24).expect("spawn pty");
         pane.resize(40, 10);
         assert_eq!(pane.render_lines().len(), 10);
+    }
+
+    #[test]
+    fn wheel_scrolls_scrollback_and_typing_snaps_back() {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args([
+            "-c",
+            "i=0; while [ $i -lt 40 ]; do echo line$i; i=$((i+1)); done; sleep 5",
+        ]);
+        let mut pane = TermPane::spawn(Some(cmd), 80, 10).expect("spawn pty");
+        assert!(wait_for(&pane, "line39"), "output: {}", grid_text(&pane));
+        pane.on_scroll(false); // scroll up into history
+        assert!(
+            !grid_text(&pane).contains("line39"),
+            "scrolled view must leave the bottom"
+        );
+        pane.send_key(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(
+            grid_text(&pane).contains("line39"),
+            "typing snaps back to the live bottom"
+        );
     }
 
     #[test]

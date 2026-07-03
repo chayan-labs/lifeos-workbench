@@ -289,6 +289,35 @@ impl EditorPane {
         true
     }
 
+    /// Columns consumed by the gutter (severity marker + line number + gap),
+    /// so mouse hits can be translated into content columns.
+    pub fn gutter_cols(&self) -> usize {
+        1 + self.doc.len_lines().to_string().len().max(3) + 1
+    }
+
+    /// Place the cursor from a mouse hit: `viewport_row` is relative to the
+    /// rendered rows (scroll applied), `content_col` is past the gutter.
+    pub fn on_click(&mut self, viewport_row: usize, content_col: usize) {
+        let total = self.doc.len_lines();
+        let line = (self.scroll + viewport_row).min(total.saturating_sub(1));
+        let l = self.doc.line(line);
+        let has_newline = l.len_chars() > 0 && l.char(l.len_chars() - 1) == '\n';
+        let max_col = l.len_chars().saturating_sub(usize::from(has_newline));
+        let col = content_col.min(max_col);
+        self.selection = Selection::point(self.doc.line_to_char(line) + col);
+    }
+
+    /// Wheel scroll: move the cursor vertically so the auto-follow scroll in
+    /// `render_lines` brings the view along without fighting the wheel.
+    pub fn on_scroll(&mut self, down: bool) {
+        let dir = if down {
+            Direction::Forward
+        } else {
+            Direction::Backward
+        };
+        self.move_cursor(false, dir, 3);
+    }
+
     fn refresh_highlight(&mut self) {
         if !self.hl_stale {
             return;
@@ -489,6 +518,39 @@ mod tests {
             .style
             .add_modifier
             .contains(Modifier::UNDERLINED));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn click_places_the_cursor_and_clamps_to_line_ends() {
+        let (mut ed, path) = pane_with("abc\nde\n");
+        ed.on_click(1, 1);
+        assert_eq!(ed.cursor_line_col(), (1, 1));
+        // Past end of line clamps to just after the last char.
+        ed.on_click(0, 99);
+        assert_eq!(ed.cursor_line_col(), (0, 3));
+        // Past end of document clamps to the last line.
+        ed.on_click(99, 0);
+        assert_eq!(ed.cursor_line_col().0, 2);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn wheel_scroll_moves_the_cursor_three_lines() {
+        let content: String = (0..20).map(|i| format!("line {i}\n")).collect();
+        let (mut ed, path) = pane_with(&content);
+        ed.on_scroll(true);
+        assert_eq!(ed.cursor_line_col().0, 3);
+        ed.on_scroll(false);
+        assert_eq!(ed.cursor_line_col().0, 0);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn gutter_width_tracks_line_count() {
+        let (ed, path) = pane_with("a\n");
+        // marker(1) + max(3 digits) + gap(1)
+        assert_eq!(ed.gutter_cols(), 5);
         std::fs::remove_file(path).ok();
     }
 
