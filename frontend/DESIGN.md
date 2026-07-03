@@ -1,6 +1,6 @@
 ---
-name: Life OS Workbench — Terminal Brutalism (TUI)
-target: terminal (monospace character grid; truecolor with 256-color + 16-color fallbacks)
+name: Life OS Workbench — Terminal Brutalism (cell grid)
+target: native GPU window (primary — winit+wgpu glyph grid, truecolor always, ligatures, user fonts) · terminal via --tui (fallback — truecolor with 256-color + 16-color degradation)
 supersedes: Life OS Neo-Brutal (web/React design system)
 palette:
   # Truecolor hex kept from the Neo-Brutal identity so cloud/local/TUI read as one brand.
@@ -95,14 +95,25 @@ Rendering is **ratatui** widgets driven by the same Life OS module manifests (`v
 
 Terminal-weight is the product constraint, so visual richness degrades on purpose, in a fixed order:
 
-- **Images** (galleries, Figma thumbnails, generated media, rendered flamegraphs) → terminal graphics protocol; else a metadata list. Recommend a graphics-capable terminal (ghostty / kitty / wezterm).
+- **Images** (galleries, Figma thumbnails, generated media, rendered flamegraphs) → **window mode:** cell-aligned textured quads drawn by our renderer (first-class, no protocol); **`--tui`:** terminal graphics protocol (Kitty/Sixel/iTerm2), else a metadata list.
 - **True-graphical tail** (large zoomable graphs, Figma canvas editing, video/audio playback, real maps) → **on-demand external viewer**, opened only when asked, so the app stays terminal-weight.
-- **If design/graph work becomes daily-critical** → optional **GPUI sidecar** (native GPU app with embedded terminal); explicitly heavier, a deliberate fallback, never the default.
+- **If design/graph work becomes daily-critical** → bounded **wgpu canvas-overlay panes** inside the same window; explicitly an exception, never the default, never a GUI toolkit.
 
 Never fork a manifest or bloat the whole app to serve the tail; degrade the *view*, keep the data model and the weight intact.
 
-## Terminal support & fallbacks
+## Window mode (primary surface)
+
+The standalone app owns its renderer, so the same cell-grid system gains a polish tier no host terminal offers. Everything below lives **under** the ratatui `Backend` seam - widgets never branch on the mode.
+
+- **Typography:** user-chosen monospace face (default: JetBrains Mono), ligatures on, emoji + CJK fallback via cosmic-text, crisp HiDPI glyph atlas, subtle cell padding (x: 2px, y: 2px) and window padding (8px) so the grid breathes like Zed rather than abutting the window edge.
+- **Sub-cell decorations** (renderer-level modifiers panes can request): wavy diagnostic underlines, faded *ghost text* for edit prediction, soft-blended selection tint, scrollbar strip with search/diagnostic/git marks, cursor styles (block/bar/underline) with optional smooth trailing animation (≤120ms; off by default - Brutalism prefers snap).
+- **Window chrome:** native macOS traffic lights on a titlebar-merged top row (title = `workspace · cwd · mode`), dock icon + menu bar (muda), native clipboard/IME/drag-and-drop.
+- **Theme import:** VS Code theme JSON and WezTerm color schemes map onto the palette roles above (bg/surface/fg/primary/accent/success/error/outline); Terminal Brutalism stays the default identity.
+- **Weight budget:** cold start < 150ms to first frame, < 150MB resident with editor + terminal + agent panes open, 60fps scroll/resize. If a feature can't fit the budget it belongs in an escape hatch, not the core.
+
+## Terminal support & fallbacks (`--tui`)
 
 - **Truecolor** preferred (all hexes above); **256-color** and **16-color ANSI** fallbacks are defined per palette entry so the system stays legible on degraded/SSH terminals.
 - **No reliance on color alone** — every state also carries an SGR attribute (`bold`/`reverse`/`dim`/`underline`) and/or a glyph, so meaning survives monochrome.
 - **Graphics protocols are optional** — every image view has a text fallback; the app is fully usable on a plain VT100-class terminal, just without inline media.
+- **Sub-cell decorations degrade:** squiggles → `underline` + color, ghost text → `dim`, scrollbar marks → gutter glyphs.
