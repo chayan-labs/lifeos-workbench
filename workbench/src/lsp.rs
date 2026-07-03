@@ -17,6 +17,8 @@ use std::time::Duration;
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
     pub line: usize,
+    /// LSP DiagnosticSeverity: 1 = error, 2 = warning, 3 = info, 4 = hint.
+    pub severity: u8,
     pub message: String,
 }
 
@@ -240,6 +242,7 @@ fn route(pending: &Pending, diagnostics: &Diagnostics, msg: Value) {
                     .filter_map(|d| {
                         Some(Diagnostic {
                             line: d["range"]["start"]["line"].as_u64()? as usize,
+                            severity: d["severity"].as_u64().unwrap_or(1) as u8,
                             message: d["message"].as_str()?.to_string(),
                         })
                     })

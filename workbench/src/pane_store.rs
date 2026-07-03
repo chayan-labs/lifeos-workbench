@@ -140,7 +140,7 @@ impl PaneStore {
             editor.diagnostics = client
                 .diagnostics_for(&editor.path)
                 .into_iter()
-                .map(|d| (d.line, d.message))
+                .map(|d| (d.line, d.severity, d.message))
                 .collect();
             match editor.lsp_op.take() {
                 Some(LspOp::Hover) => {

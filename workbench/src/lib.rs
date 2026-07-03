@@ -4,6 +4,7 @@
 pub mod acp;
 pub mod agent_pane;
 pub mod api;
+pub mod decorations;
 pub mod diff;
 pub mod driver;
 pub mod editor;

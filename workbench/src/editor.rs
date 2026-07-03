@@ -32,8 +32,9 @@ pub struct EditorPane {
     hl: Vec<StyledRange>,
     hl_stale: bool,
     pending: Option<char>,
-    /// (line, message) markers pushed in by the LSP layer.
-    pub diagnostics: Vec<(usize, String)>,
+    /// (line, severity, message) markers pushed in by the LSP layer
+    /// (severity: 1 = error, 2 = warning, 3+ = info/hint).
+    pub diagnostics: Vec<(usize, u8, String)>,
     /// One-line transient message (hover result, save confirmation).
     pub message: Option<String>,
     /// LSP request the shell should service (K = hover, gd = definition).
@@ -310,7 +311,8 @@ impl EditorPane {
         }
         let total = self.doc.len_lines();
         let gutter_width = total.to_string().len().max(3);
-        let diag_lines: Vec<usize> = self.diagnostics.iter().map(|(l, _)| *l).collect();
+        let diag_lines: Vec<(usize, u8)> =
+            self.diagnostics.iter().map(|(l, s, _)| (*l, *s)).collect();
         (self.scroll..total.min(self.scroll + height))
             .map(|row| {
                 self.render_row(
@@ -324,23 +326,41 @@ impl EditorPane {
             .collect()
     }
 
+    /// Scroll offset and total line count, for the marked scrollbar strip.
+    pub fn scroll_info(&self) -> (usize, usize) {
+        (self.scroll, self.doc.len_lines())
+    }
+
     fn render_row(
         &self,
         row: usize,
         gutter_width: usize,
-        diag_lines: &[usize],
+        diag_lines: &[(usize, u8)],
         is_cursor_row: bool,
         cursor_col: usize,
     ) -> Line<'static> {
-        let marker = if diag_lines.contains(&row) {
-            "●"
-        } else {
-            " "
+        let severity = diag_lines
+            .iter()
+            .filter(|(l, _)| *l == row)
+            .map(|(_, s)| *s)
+            .min();
+        let (marker, marker_style) = match severity {
+            Some(s) => (
+                "●",
+                ratatui::style::Style::default().fg(crate::decorations::severity_color(s)),
+            ),
+            None => (
+                " ",
+                ratatui::style::Style::default().fg(ratatui::style::Color::Indexed(101)),
+            ),
         };
-        let mut spans = vec![Span::styled(
-            format!("{marker}{:>gutter_width$} ", row + 1),
-            ratatui::style::Style::default().fg(ratatui::style::Color::Indexed(101)),
-        )];
+        let mut spans = vec![
+            Span::styled(marker.to_string(), marker_style),
+            Span::styled(
+                format!("{:>gutter_width$} ", row + 1),
+                ratatui::style::Style::default().fg(ratatui::style::Color::Indexed(101)),
+            ),
+        ];
         let line_start_char = self.doc.line_to_char(row);
         let line = self.doc.line(row);
         for (i, ch) in line.chars().enumerate() {
@@ -349,6 +369,9 @@ impl EditorPane {
             }
             let byte = self.doc.char_to_byte(line_start_char + i);
             let mut style = highlight::style_at(&self.hl, byte).unwrap_or_default();
+            if let Some(s) = severity {
+                style = style.patch(crate::decorations::squiggle(s));
+            }
             if is_cursor_row && i == cursor_col {
                 style = style.add_modifier(Modifier::REVERSED);
             }
@@ -438,9 +461,34 @@ mod tests {
         assert!(lines.len() >= 3);
         let first: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(first.contains("1 fn main"), "gutter + text: {first}");
+        // Gutter is two spans: severity marker (blank here) + line number.
+        assert_eq!(lines[0].spans[0].content.as_ref(), " ");
+        assert!(lines[0].spans[1].content.contains('1'));
         // The 'f' of fn is keyword-styled and cursor-reversed.
-        let fn_span = &lines[0].spans[1];
+        let fn_span = &lines[0].spans[2];
         assert!(fn_span.style.add_modifier.contains(Modifier::REVERSED));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn diagnostic_rows_render_severity_marker_and_underline() {
+        let (mut ed, path) = pane_with("let x = 1;\nok\n");
+        ed.diagnostics = vec![(0, 1, "boom".to_string())];
+        let lines = ed.render_lines(10);
+        // Row 0: error marker in severity color, text underlined.
+        assert_eq!(lines[0].spans[0].content.as_ref(), "●");
+        assert_eq!(
+            lines[0].spans[0].style.fg,
+            Some(crate::decorations::severity_color(1))
+        );
+        let text_span = &lines[0].spans[2];
+        assert!(text_span.style.add_modifier.contains(Modifier::UNDERLINED));
+        // Row 1 is clean: blank marker, no underline.
+        assert_eq!(lines[1].spans[0].content.as_ref(), " ");
+        assert!(!lines[1].spans[2]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
         std::fs::remove_file(path).ok();
     }
 

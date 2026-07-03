@@ -135,7 +135,8 @@ impl Shell {
     }
 
     /// Open a file in the focused pane's editor, closing any modal.
-    fn open_in_focused(&self, path: PathBuf) -> Shell {
+    /// Public so the window host can route drag-and-dropped files here.
+    pub fn open_in_focused(&self, path: PathBuf) -> Shell {
         let mut next = self.clone();
         next.tree = None;
         next.picker = None;
@@ -325,6 +326,36 @@ impl Shell {
             },
         };
         frame.render_widget(widget, rect);
+
+        // Marked scrollbar strip on the editor's right edge (issue #29):
+        // viewport thumb + diagnostic marks, visible without scrolling.
+        if let PaneDesire::Editor(_) = &desire {
+            if let Some(editor) = panes.editor(pane) {
+                if rect.width > 3 && rect.height > 2 {
+                    let strip = Rect {
+                        x: rect.x + rect.width - 2,
+                        y: rect.y + 1,
+                        width: 1,
+                        height: rect.height - 2,
+                    };
+                    let (scroll, total) = editor.scroll_info();
+                    let marks = editor
+                        .diagnostics
+                        .iter()
+                        .map(|(line, severity, _)| (*line, *severity))
+                        .collect();
+                    frame.render_widget(
+                        crate::decorations::MarkedScrollbar::new(
+                            total,
+                            scroll,
+                            strip.height as usize,
+                            marks,
+                        ),
+                        strip,
+                    );
+                }
+            }
+        }
     }
 
     fn modal_rect(&self, area: Rect) -> Rect {
