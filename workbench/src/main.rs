@@ -1,37 +1,50 @@
 //! Workbench entry point: opens the in-process `lifeos-api` state (no
-//! socket), then runs the TUI shell - tiling panes, command palette, and the
-//! Terminal Brutalism statusline. `workbench --check` skips the TUI and just
-//! proves the in-process linkage (used by CI/scripts).
+//! socket), then runs the app. The primary face is the standalone GPU
+//! window (winit + wgpu glyph grid); `--tui` renders in the host terminal
+//! instead (SSH/headless), `--mcp` serves the agent toolbelt over stdio,
+//! and `--check` just proves the in-process linkage (used by CI/scripts).
 
 use crossterm::event;
 use lifeos_api::config::{Config, DEFAULT_WORKSPACE};
 use lifeos_workbench::api::InProcessApi;
+use lifeos_workbench::driver;
 use lifeos_workbench::pane_store::PaneStore;
 use lifeos_workbench::shell::Shell;
 use lifeos_workbench::theme::{ColorSupport, Theme};
 use std::time::Duration;
 
-#[tokio::main]
-async fn main() {
-    let config = Config::from_env();
-    let api = match InProcessApi::new(config).await {
-        Ok(api) => api,
+fn main() {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
         Err(e) => {
-            eprintln!("workbench: failed to open Life OS state: {e}");
+            eprintln!("workbench: failed to start async runtime: {e}");
             std::process::exit(1);
         }
     };
-    let health = api.get("/api/health", None).await;
-    if !health.is_success() {
-        eprintln!(
-            "workbench: in-process health check failed: {}",
-            health.status
-        );
-        std::process::exit(1);
-    }
+
+    let config = Config::from_env();
+    let api = runtime.block_on(async {
+        let api = match InProcessApi::new(config).await {
+            Ok(api) => api,
+            Err(e) => {
+                eprintln!("workbench: failed to open Life OS state: {e}");
+                std::process::exit(1);
+            }
+        };
+        let health = api.get("/api/health", None).await;
+        if !health.is_success() {
+            eprintln!(
+                "workbench: in-process health check failed: {}",
+                health.status
+            );
+            std::process::exit(1);
+        }
+        api
+    });
+
     if std::env::args().any(|a| a == "--mcp") {
         // Toolbelt mode (issue #17): serve MCP over stdio for the ACP agent.
-        if let Err(e) = lifeos_workbench::mcp_server::serve_stdio(api).await {
+        if let Err(e) = runtime.block_on(lifeos_workbench::mcp_server::serve_stdio(api)) {
             eprintln!("workbench: mcp server error: {e}");
             std::process::exit(1);
         }
@@ -44,13 +57,22 @@ async fn main() {
         );
         return;
     }
-    if let Err(e) = run_shell(api) {
-        eprintln!("workbench: shell error: {e}");
+
+    // Panes spawn async work (PTYs, ACP, LSP); keep the runtime entered for
+    // the lifetime of either frontend.
+    let _guard = runtime.enter();
+    if std::env::args().any(|a| a == "--tui") {
+        if let Err(e) = run_tui(api) {
+            eprintln!("workbench: shell error: {e}");
+            std::process::exit(1);
+        }
+    } else if let Err(e) = lifeos_workbench::gui::run_gui(api, DEFAULT_WORKSPACE.to_string()) {
+        eprintln!("workbench: window error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_shell(api: InProcessApi) -> std::io::Result<()> {
+fn run_tui(api: InProcessApi) -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let theme = Theme::new(ColorSupport::detect());
     let mut shell = Shell::new(theme, DEFAULT_WORKSPACE.to_string());
@@ -64,48 +86,11 @@ fn run_shell(api: InProcessApi) -> std::io::Result<()> {
             terminal.draw(|frame| shell.draw(frame, &mut panes))?;
             if event::poll(Duration::from_millis(50))? {
                 let ev = event::read()?;
-                if shell.forwards_to_pane(&ev) {
-                    forward_key(&shell, &mut panes, &ev);
-                } else {
-                    shell = shell.on_event(&ev);
-                }
+                shell = driver::dispatch(shell, &mut panes, &ev);
             }
         }
         Ok(())
     })();
     ratatui::restore();
     result
-}
-
-/// Route a pane-bound key: editors get modal keys, terminals get VT bytes.
-fn forward_key(shell: &Shell, panes: &mut PaneStore, ev: &crossterm::event::Event) {
-    let crossterm::event::Event::Key(key) = ev else {
-        return;
-    };
-    let focused = shell.layout.tab().focused;
-    match shell.focused_desire() {
-        lifeos_workbench::shell::PaneDesire::Editor(_) => {
-            if let Some(editor) = panes.editor_mut(focused) {
-                let ctrl = key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL);
-                editor.on_key(key.code, ctrl);
-            }
-        }
-        lifeos_workbench::shell::PaneDesire::Agent => {
-            if let Some(agent) = panes.agent_mut(focused) {
-                agent.on_key(key.code);
-            }
-        }
-        lifeos_workbench::shell::PaneDesire::Search => {
-            if let Some(search) = panes.search_mut(focused) {
-                search.on_key(key.code);
-            }
-        }
-        lifeos_workbench::shell::PaneDesire::Terminal => {
-            if let Some(term) = panes.term_mut(focused) {
-                term.send_key(key);
-            }
-        }
-    }
 }
