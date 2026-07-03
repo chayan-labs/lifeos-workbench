@@ -13,7 +13,34 @@ use lifeos_workbench::shell::Shell;
 use lifeos_workbench::theme::{ColorSupport, Theme};
 use std::time::Duration;
 
+/// Finder launches the .app with cwd `/` and a bare environment; the DB
+/// paths in `Config::from_env` are cwd-relative. Fall back to a per-user
+/// state dir + $HOME cwd so double-clicking Workbench.app just works.
+fn fix_finder_launch_env() {
+    let cwd_is_root = std::env::current_dir()
+        .map(|d| d == std::path::Path::new("/"))
+        .unwrap_or(true);
+    if !cwd_is_root {
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let home = std::path::PathBuf::from(home);
+    let _ = std::env::set_current_dir(&home);
+    if std::env::var_os("LIFEOS_DB_PATH").is_none() {
+        let state = home.join("Library/Application Support/LifeOS");
+        if std::fs::create_dir_all(&state).is_ok() {
+            std::env::set_var("LIFEOS_DB_PATH", state.join("lifeos.db"));
+            if std::env::var_os("LIFEOS_DERIVED_DB_PATH").is_none() {
+                std::env::set_var("LIFEOS_DERIVED_DB_PATH", state.join("lifeos-derived.db"));
+            }
+        }
+    }
+}
+
 fn main() {
+    fix_finder_launch_env();
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
         Err(e) => {
