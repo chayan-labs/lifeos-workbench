@@ -12,7 +12,8 @@ use crate::theme::{self, StatuslineState, Theme};
 use crate::workspace::{self, Chrome, Region, DOCK_PANE};
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::layout::{Alignment, Rect};
-use ratatui::text::Line;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 use std::collections::HashMap;
@@ -27,6 +28,8 @@ pub enum PaneDesire {
     Editor(PathBuf),
     Agent,
     Search,
+    /// The Life OS module browser (manifests → views → rendered entities).
+    LifeOs,
 }
 
 /// Whole-shell state. Cloned-and-replaced per event (immutable convention).
@@ -168,6 +171,47 @@ impl Shell {
         next
     }
 
+    /// Close a center pane (mouse ×, alt+x, or its shell exiting). The
+    /// last pane never leaves an empty frame: it reverts to the welcome
+    /// surface if it held content, and quits only when already welcome.
+    pub fn close_center_pane(&self, pane: PaneId) -> Shell {
+        let mut next = self.clone();
+        match self.layout.close_pane(pane) {
+            Some(layout) => {
+                next.layout = layout;
+                next.desires.remove(&pane);
+            }
+            None => {
+                if matches!(self.desires.get(&pane), Some(PaneDesire::Welcome) | None) {
+                    next.running = false;
+                } else {
+                    next.desires.insert(pane, PaneDesire::Welcome);
+                }
+            }
+        }
+        next
+    }
+
+    /// A terminal pane's shell exited (`exit`): the dock closes (a fresh
+    /// shell spawns next time it opens), a center terminal pane closes like
+    /// a clicked ×. Panes in background tabs respawn on revisit instead.
+    pub fn on_pane_exit(&self, pane: PaneId) -> Shell {
+        if pane == DOCK_PANE {
+            let mut next = self.clone();
+            next.chrome.dock_open = false;
+            next.desires.insert(DOCK_PANE, PaneDesire::Welcome);
+            if next.chrome.focus == Region::Dock {
+                next.chrome.focus = Region::Center;
+            }
+            return next;
+        }
+        let is_terminal = matches!(self.desires.get(&pane), Some(PaneDesire::Terminal));
+        if !is_terminal || !self.layout.tab().root.panes().contains(&pane) {
+            return self.clone();
+        }
+        self.close_center_pane(pane)
+    }
+
     /// True when a key press belongs to the focused pane (terminal, editor,
     /// dock, ...) rather than a chord, an open modal, or the sidebar.
     pub fn forwards_to_pane(&self, event: &Event) -> bool {
@@ -202,9 +246,12 @@ impl Shell {
                 next.desires.insert(pane, PaneDesire::Welcome);
                 next.chrome.focus = Region::Center;
             }
-            CommandId::ClosePane => match self.layout.close_focused() {
-                Some(layout) => next.layout = layout,
-                None => next.running = false,
+            CommandId::ClosePane => match self.chrome.focus {
+                Region::Dock => {
+                    next.chrome.dock_open = false;
+                    next.chrome.focus = Region::Center;
+                }
+                _ => return self.close_center_pane(self.layout.tab().focused),
             },
             CommandId::FocusNext | CommandId::FocusPrev if self.chrome.focus != Region::Center => {
                 next.chrome.focus = Region::Center;
@@ -245,6 +292,11 @@ impl Shell {
                     .insert(self.layout.tab().focused, PaneDesire::Search);
                 next.chrome.focus = Region::Center;
             }
+            CommandId::OpenLifeOsPane => {
+                next.desires
+                    .insert(self.layout.tab().focused, PaneDesire::LifeOs);
+                next.chrome.focus = Region::Center;
+            }
             CommandId::ToggleSidebar => match &self.tree {
                 Some(_) => {
                     next.tree = None;
@@ -264,6 +316,11 @@ impl Shell {
                 } else {
                     Region::Center
                 };
+                // Re-arm the dock's shell (its desire drops to Welcome when
+                // the previous shell exits via `exit`).
+                if next.chrome.dock_open {
+                    next.desires.insert(DOCK_PANE, PaneDesire::Terminal);
+                }
             }
             CommandId::OpenFilePicker => next.picker = Some(PickerState::open(&self.cwd_path())),
             CommandId::Quit => next.running = false,
@@ -305,9 +362,11 @@ impl Shell {
         }
 
         let tab = self.layout.tab();
+        let center_right = cr.center.x + cr.center.width;
         for (pane, rect) in tab.root.rects(cr.center) {
             let focused = self.chrome.focus == Region::Center && pane == tab.focused;
-            self.draw_pane(frame, panes, pane, rect, focused);
+            let separator = rect.x + rect.width < center_right;
+            self.draw_pane(frame, panes, pane, rect, focused, separator);
         }
         if let Some(rect) = cr.dock {
             self.draw_pane(
@@ -316,6 +375,7 @@ impl Shell {
                 DOCK_PANE,
                 rect,
                 self.chrome.focus == Region::Dock,
+                false,
             );
         }
 
@@ -331,6 +391,7 @@ impl Shell {
                 PaneDesire::Terminal => "TERMINAL".into(),
                 PaneDesire::Agent => "AGENT".into(),
                 PaneDesire::Search => "RECALL".into(),
+                PaneDesire::LifeOs => "LIFE OS".into(),
                 PaneDesire::Welcome => "SHELL".into(),
             },
         };
@@ -338,7 +399,7 @@ impl Shell {
             status.agent = agent.status();
         }
         frame.render_widget(
-            Paragraph::new(theme::statusline(&self.theme, &status)),
+            Paragraph::new(theme::statusline(&self.theme, &status)).style(self.theme.panel_bg()),
             cr.status,
         );
 
@@ -351,34 +412,41 @@ impl Shell {
     }
 
     fn draw_tab_bar(&self, frame: &mut Frame, rect: Rect) {
-        let spans: Vec<ratatui::text::Span> = workspace::tab_bar_items(&self.layout)
+        let spans: Vec<Span> = workspace::tab_bar_items(&self.layout)
             .into_iter()
             .map(|(label, hit)| {
                 let style = match hit {
                     workspace::TabHit::Tab(i) if i == self.layout.active_tab => {
-                        self.theme.active_item()
+                        self.theme.tab_active()
                     }
-                    _ => self.theme.muted(),
+                    _ => self.theme.tab_inactive(),
                 };
-                ratatui::text::Span::styled(label, style)
+                Span::styled(label, style)
             })
             .collect();
-        frame.render_widget(Paragraph::new(Line::from(spans)), rect);
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(self.theme.panel_bg()),
+            rect,
+        );
     }
 
     fn draw_sidebar(&self, frame: &mut Frame, tree: &FileTree, rect: Rect) {
         let focused = self.chrome.focus == Region::Sidebar;
-        let (border_style, border_set) = if focused {
-            self.theme.border_focus()
+        // Flat Zed-style panel: shaded fill, FILES header, no box border.
+        frame.render_widget(Block::default().style(self.theme.panel_bg()), rect);
+        let header_style = if focused {
+            Style::default()
+                .fg(theme::ACCENT.resolve(self.theme.support))
+                .add_modifier(Modifier::BOLD)
         } else {
-            self.theme.border_inactive()
+            Style::default().add_modifier(Modifier::BOLD)
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_set(border_set)
-            .border_style(border_style)
-            .title(" files ");
-        let height = rect.height.saturating_sub(2) as usize;
+        frame.render_widget(
+            Paragraph::new(Line::styled(" FILES", header_style)).style(self.theme.panel_bg()),
+            workspace::pane_header(rect),
+        );
+        let list_rect = workspace::pane_content(rect);
+        let height = list_rect.height as usize;
         let scroll = workspace::scroll_offset(tree.selected, height);
         let rows: Vec<ListItem> = tree
             .rows()
@@ -394,19 +462,32 @@ impl Shell {
                     _ => "  ",
                 };
                 let label = format!(
-                    "{}{glyph}{}",
+                    " {}{glyph}{}",
                     "  ".repeat(r.depth),
                     name.unwrap_or_default()
                 );
                 let style = if i == tree.selected {
                     self.theme.active_item()
                 } else {
-                    self.theme.text()
+                    Style::default().fg(theme::FG.resolve(self.theme.support))
                 };
                 ListItem::new(label).style(style)
             })
             .collect();
-        frame.render_widget(List::new(rows).block(block), rect);
+        frame.render_widget(List::new(rows).style(self.theme.panel_bg()), list_rect);
+    }
+
+    /// A pane's kind dot color: instant visual identification in the header.
+    fn pane_dot(&self, desire: &PaneDesire) -> Style {
+        let color = match desire {
+            PaneDesire::Editor(_) => theme::PRIMARY,
+            PaneDesire::Terminal => theme::SUCCESS,
+            PaneDesire::Agent => theme::ACCENT,
+            PaneDesire::Search => theme::PRIMARY,
+            PaneDesire::LifeOs => theme::PRIMARY,
+            PaneDesire::Welcome => theme::FG_DIM,
+        };
+        Style::default().fg(color.resolve(self.theme.support))
     }
 
     fn draw_pane(
@@ -416,62 +497,73 @@ impl Shell {
         pane: PaneId,
         rect: Rect,
         focused: bool,
+        separator: bool,
     ) {
-        let (border_style, border_set) = if focused {
-            self.theme.border_focus()
-        } else {
-            self.theme.border_inactive()
-        };
+        if rect.height < 2 || rect.width < 5 {
+            return;
+        }
         let desire = self
             .desires
             .get(&pane)
             .cloned()
             .unwrap_or(PaneDesire::Terminal);
         let title = match &desire {
-            PaneDesire::Editor(path) => format!(
-                " {} ",
-                path.file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or_default()
-            ),
-            PaneDesire::Terminal if pane == DOCK_PANE => " terminal ".to_string(),
-            PaneDesire::Terminal => format!(" terminal {pane} "),
-            PaneDesire::Agent => " agent ".to_string(),
-            PaneDesire::Search => " recall ".to_string(),
-            PaneDesire::Welcome => " welcome ".to_string(),
+            PaneDesire::Editor(path) => path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            PaneDesire::Terminal => "terminal".to_string(),
+            PaneDesire::Agent => "agent".to_string(),
+            PaneDesire::Search => "recall".to_string(),
+            PaneDesire::LifeOs => "life os".to_string(),
+            PaneDesire::Welcome => "welcome".to_string(),
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_set(border_set)
-            .border_style(border_style)
-            .title(title);
-        let inner_height = rect.height.saturating_sub(2) as usize;
+        // Zed-style flat pane: one header row (dot + title + ×), content
+        // below, no box borders.
+        let header_style = if focused {
+            self.theme.header_focused()
+        } else {
+            self.theme.header_unfocused()
+        };
+        let header_line = Line::from(vec![
+            Span::styled(" ● ".to_string(), self.pane_dot(&desire)),
+            Span::raw(title),
+        ]);
+        frame.render_widget(
+            Paragraph::new(header_line).style(header_style),
+            workspace::pane_header(rect),
+        );
+        frame.render_widget(
+            Paragraph::new(" × ").style(header_style),
+            workspace::close_button(rect),
+        );
+
+        let content = workspace::pane_content(rect);
+        let inner_height = content.height as usize;
         let widget = match &desire {
             PaneDesire::Editor(_) => match panes.editor_mut(pane) {
-                Some(editor) => Paragraph::new(editor.render_lines(inner_height)).block(block),
-                None => Paragraph::new("opening…")
-                    .style(self.theme.muted())
-                    .block(block),
+                Some(editor) => Paragraph::new(editor.render_lines(inner_height)),
+                None => Paragraph::new("opening…").style(self.theme.muted()),
             },
             PaneDesire::Terminal => match panes.term(pane) {
-                Some(term) => Paragraph::new(term.render_lines()).block(block),
-                None => Paragraph::new("no shell - ctrl-k for commands")
-                    .style(self.theme.muted())
-                    .block(block),
+                Some(term) => Paragraph::new(term.render_lines()),
+                None => Paragraph::new("no shell - ctrl-k for commands").style(self.theme.muted()),
             },
             PaneDesire::Agent => match panes.agent(pane) {
-                Some(agent) => {
-                    Paragraph::new(agent.render_lines(&self.theme, inner_height)).block(block)
-                }
-                None => Paragraph::new("starting agent…")
-                    .style(self.theme.muted())
-                    .block(block),
+                Some(agent) => Paragraph::new(agent.render_lines(&self.theme, inner_height)),
+                None => Paragraph::new("starting agent…").style(self.theme.muted()),
             },
             PaneDesire::Search => match panes.search(pane) {
-                Some(search) => Paragraph::new(search.render_lines(&self.theme)).block(block),
-                None => Paragraph::new("search unavailable (no api handle)")
-                    .style(self.theme.muted())
-                    .block(block),
+                Some(search) => Paragraph::new(search.render_lines(&self.theme)),
+                None => {
+                    Paragraph::new("search unavailable (no api handle)").style(self.theme.muted())
+                }
+            },
+            PaneDesire::LifeOs => match panes.lifeos(pane) {
+                Some(lifeos) => Paragraph::new(lifeos.render_lines(&self.theme)),
+                None => {
+                    Paragraph::new("life os unavailable (no api handle)").style(self.theme.muted())
+                }
             },
             PaneDesire::Welcome => {
                 let hints = workspace::welcome_lines();
@@ -485,41 +577,44 @@ impl Shell {
                     };
                     Line::styled(text, style)
                 }));
-                Paragraph::new(lines)
-                    .alignment(Alignment::Center)
-                    .block(block)
+                Paragraph::new(lines).alignment(Alignment::Center)
             }
         };
-        frame.render_widget(widget, rect);
+        frame.render_widget(widget, content);
 
-        // Marked scrollbar strip on the editor's right edge (issue #29):
-        // viewport thumb + diagnostic marks, visible without scrolling.
+        // Right-edge column: marked scrollbar for editors (issue #29), a
+        // dim seam between side-by-side panes otherwise.
+        let strip = Rect {
+            x: rect.x + rect.width - 1,
+            y: content.y,
+            width: 1,
+            height: content.height,
+        };
         if let PaneDesire::Editor(_) = &desire {
             if let Some(editor) = panes.editor(pane) {
-                if rect.width > 3 && rect.height > 2 {
-                    let strip = Rect {
-                        x: rect.x + rect.width - 2,
-                        y: rect.y + 1,
-                        width: 1,
-                        height: rect.height - 2,
-                    };
-                    let (scroll, total) = editor.scroll_info();
-                    let marks = editor
-                        .diagnostics
-                        .iter()
-                        .map(|(line, severity, _)| (*line, *severity))
-                        .collect();
-                    frame.render_widget(
-                        crate::decorations::MarkedScrollbar::new(
-                            total,
-                            scroll,
-                            strip.height as usize,
-                            marks,
-                        ),
-                        strip,
-                    );
-                }
+                let (scroll, total) = editor.scroll_info();
+                let marks = editor
+                    .diagnostics
+                    .iter()
+                    .map(|(line, severity, _)| (*line, *severity))
+                    .collect();
+                frame.render_widget(
+                    crate::decorations::MarkedScrollbar::new(
+                        total,
+                        scroll,
+                        strip.height as usize,
+                        marks,
+                    ),
+                    strip,
+                );
             }
+        } else if separator {
+            let seam = vec![Line::from("│"); strip.height as usize];
+            frame.render_widget(
+                Paragraph::new(seam)
+                    .style(Style::default().fg(theme::OUTLINE.resolve(self.theme.support))),
+                strip,
+            );
         }
     }
 
@@ -702,6 +797,41 @@ mod tests {
         assert_eq!(s.chrome.focus, Region::Center);
         assert_eq!(s.focused_desire(), PaneDesire::Welcome);
         assert!(!s.forwards_to_pane(&key(KeyCode::Char('j'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn dock_shell_exit_closes_the_dock_and_reopening_rearms_it() {
+        let s = shell();
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT)); // close
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT)); // open + focus
+        let s = s.on_pane_exit(DOCK_PANE);
+        assert!(!s.chrome.dock_open, "exit closes the dock");
+        assert_eq!(s.chrome.focus, Region::Center);
+        assert_eq!(s.desires.get(&DOCK_PANE), Some(&PaneDesire::Welcome));
+        let s = s.on_event(&key(KeyCode::Char('j'), KeyModifiers::ALT));
+        assert!(s.chrome.dock_open);
+        assert_eq!(
+            s.desires.get(&DOCK_PANE),
+            Some(&PaneDesire::Terminal),
+            "reopening the dock spawns a fresh shell"
+        );
+    }
+
+    #[test]
+    fn center_terminal_exit_closes_the_pane_or_reverts_to_welcome() {
+        // Two panes: exiting one closes it and drops its desire.
+        let s = shell().run_command(CommandId::SplitHorizontal);
+        let s = s.run_command(CommandId::TerminalHere);
+        let pane = s.layout.tab().focused;
+        let s = s.on_pane_exit(pane);
+        assert_eq!(s.layout.tab().root.panes().len(), 1);
+        assert!(!s.desires.contains_key(&pane), "closed pane desire removed");
+        // Last pane: exit reverts to welcome instead of quitting.
+        let s = s.run_command(CommandId::TerminalHere);
+        let pane = s.layout.tab().focused;
+        let s = s.on_pane_exit(pane);
+        assert!(s.running);
+        assert_eq!(s.desires.get(&pane), Some(&PaneDesire::Welcome));
     }
 
     #[test]

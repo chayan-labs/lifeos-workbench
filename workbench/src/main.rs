@@ -107,6 +107,9 @@ fn run_tui(api: InProcessApi) -> std::io::Result<()> {
     let mut panes = PaneStore::new(&std::env::current_dir().unwrap_or_default(), Some(api));
     let result = (|| -> std::io::Result<()> {
         while shell.running {
+            for id in panes.reap_exited_terminals() {
+                shell = shell.on_pane_exit(id);
+            }
             let area = terminal.get_frame().area();
             panes.sync(&shell.pane_rects(area), &shell.desires);
             terminal.draw(|frame| shell.draw(frame, &mut panes))?;

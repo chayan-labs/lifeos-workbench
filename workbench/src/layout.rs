@@ -162,11 +162,21 @@ impl Layout {
     /// Close the focused pane; focus falls to the nearest remaining pane.
     /// Closing the last pane of the last tab returns `None` (quit signal).
     pub fn close_focused(&self) -> Option<Layout> {
+        self.close_pane(self.tab().focused)
+    }
+
+    /// Close a specific pane of the active tab (mouse ×, shell `exit`).
+    /// Same fall-through semantics as `close_focused`.
+    pub fn close_pane(&self, pane: PaneId) -> Option<Layout> {
         let tab = self.tab();
-        match tab.root.close(tab.focused) {
+        match tab.root.close(pane) {
             Some(root) => {
                 let panes = root.panes();
-                let focused = *panes.last().expect("non-empty tree has panes");
+                let focused = if panes.contains(&tab.focused) {
+                    tab.focused
+                } else {
+                    *panes.last().expect("non-empty tree has panes")
+                };
                 Some(self.with_tab(Tab { root, focused }, self.next_pane))
             }
             None if self.tabs.len() > 1 => {

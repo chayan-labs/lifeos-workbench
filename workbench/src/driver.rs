@@ -49,6 +49,11 @@ fn forward_key(shell: &Shell, panes: &mut PaneStore, ev: &Event) {
                 search.on_key(key.code);
             }
         }
+        PaneDesire::LifeOs => {
+            if let Some(lifeos) = panes.lifeos_mut(focused) {
+                lifeos.on_key(key.code);
+            }
+        }
         PaneDesire::Terminal => {
             if let Some(term) = panes.term_mut(focused) {
                 term.send_key(key);

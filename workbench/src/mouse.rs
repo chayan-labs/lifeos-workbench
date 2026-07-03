@@ -127,6 +127,10 @@ fn click(
     }
     if let Some(dock) = cr.dock {
         if contains(dock, col, row) {
+            // The dock header's × hides the dock (its session survives).
+            if !drag && contains(workspace::close_button(dock), col, row) {
+                return shell.run_command(crate::palette::CommandId::ToggleDock);
+            }
             let mut next = shell.clone();
             next.chrome.focus = Region::Dock;
             return next;
@@ -136,23 +140,34 @@ fn click(
         if !contains(rect, col, row) {
             continue;
         }
+        if !drag && contains(workspace::close_button(rect), col, row) {
+            return shell.close_center_pane(pane);
+        }
         let mut next = shell.clone();
         next.chrome.focus = Region::Center;
         next.layout = shell.layout.focus_pane(pane);
         // Editors: place the cursor at the clicked cell (drag moves it too).
-        if let Some(PaneDesire::Editor(_)) = shell.desires.get(&pane) {
-            if let Some(editor) = panes.editor_mut(pane) {
-                let inner = Rect {
-                    x: rect.x + 1,
-                    y: rect.y + 1,
-                    width: rect.width.saturating_sub(2),
-                    height: rect.height.saturating_sub(2),
-                };
-                if contains(inner, col, row) {
-                    let content_col = (col - inner.x).saturating_sub(editor.gutter_cols() as u16);
-                    editor.on_click((row - inner.y) as usize, content_col as usize);
+        match shell.desires.get(&pane) {
+            Some(PaneDesire::Editor(_)) => {
+                if let Some(editor) = panes.editor_mut(pane) {
+                    let inner = workspace::pane_content(rect);
+                    if contains(inner, col, row) {
+                        let content_col =
+                            (col - inner.x).saturating_sub(editor.gutter_cols() as u16);
+                        editor.on_click((row - inner.y) as usize, content_col as usize);
+                    }
                 }
             }
+            // Life OS lists: click a row to select + activate it.
+            Some(PaneDesire::LifeOs) if !drag => {
+                if let Some(lifeos) = panes.lifeos_mut(pane) {
+                    let inner = workspace::pane_content(rect);
+                    if contains(inner, col, row) {
+                        lifeos.on_click((row - inner.y) as usize);
+                    }
+                }
+            }
+            _ => {}
         }
         return next;
     }
@@ -166,12 +181,8 @@ fn sidebar_click(shell: &Shell, col: u16, row: u16, sb: Rect, drag: bool) -> She
     let Some(tree) = &shell.tree else {
         return next;
     };
-    let inner = Rect {
-        x: sb.x + 1,
-        y: sb.y + 1,
-        width: sb.width.saturating_sub(2),
-        height: sb.height.saturating_sub(2),
-    };
+    // Rows start below the flat panel's FILES header.
+    let inner = workspace::pane_content(sb);
     if drag || !contains(inner, col, row) {
         return next;
     }
@@ -243,6 +254,11 @@ fn wheel(
             Some(PaneDesire::Search) => {
                 if let Some(search) = panes.search_mut(pane) {
                     search.on_key(if down { KeyCode::Down } else { KeyCode::Up });
+                }
+            }
+            Some(PaneDesire::LifeOs) => {
+                if let Some(lifeos) = panes.lifeos_mut(pane) {
+                    lifeos.on_key(if down { KeyCode::Down } else { KeyCode::Up });
                 }
             }
             Some(PaneDesire::Welcome) => {}
@@ -377,6 +393,24 @@ mod tests {
     }
 
     #[test]
+    fn header_close_button_closes_the_pane_and_hides_the_dock() {
+        let s = shell().run_command(crate::palette::CommandId::SplitHorizontal);
+        let cr = s.chrome_rects(AREA).unwrap();
+        let rects = s.layout.tab().root.rects(cr.center);
+        assert_eq!(rects.len(), 2);
+        // Click the × in the second pane's header.
+        let close = crate::workspace::close_button(rects[1].1);
+        let next = route(&s, &mut panes(), &down(close.x + 1, close.y), AREA);
+        assert_eq!(next.layout.tab().root.panes().len(), 1);
+        // The dock's × hides the dock without killing the pane entry.
+        let dock = cr.dock.unwrap();
+        let close = crate::workspace::close_button(dock);
+        let next = route(&s, &mut panes(), &down(close.x + 1, close.y), AREA);
+        assert!(!next.chrome.dock_open);
+        assert!(next.pane_rects(AREA).iter().any(|(id, _)| *id == DOCK_PANE));
+    }
+
+    #[test]
     fn palette_click_activates_a_row_and_outside_click_dismisses() {
         let s = shell().run_command(crate::palette::CommandId::OpenPalette);
         let modal = s.modal_rect(AREA);
@@ -406,8 +440,8 @@ mod tests {
         let cr = s.chrome_rects(AREA).unwrap();
         let rect = s.layout.tab().root.rects(cr.center)[0].1;
         let gutter = store.editor(0).unwrap().gutter_cols() as u16;
-        // Click line 2 (row offset 1), column 1 of content.
-        let ev = down(rect.x + 1 + gutter + 1, rect.y + 1 + 1);
+        // Click line 2 (row offset 1), column 1 of content (below header).
+        let ev = down(rect.x + gutter + 1, rect.y + 1 + 1);
         route(&s, &mut store, &ev, AREA);
         assert_eq!(store.editor(0).unwrap().cursor_line_col(), (1, 1));
         std::fs::remove_file(file).ok();

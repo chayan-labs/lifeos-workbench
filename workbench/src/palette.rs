@@ -23,6 +23,7 @@ pub enum CommandId {
     OpenFilePicker,
     OpenAgentPane,
     OpenSearchPane,
+    OpenLifeOsPane,
     Quit,
 }
 
@@ -90,6 +91,10 @@ pub fn commands() -> Vec<Command> {
         Command {
             id: CommandId::OpenSearchPane,
             title: "search: recall (hybrid)",
+        },
+        Command {
+            id: CommandId::OpenLifeOsPane,
+            title: "life os: browse modules",
         },
         Command {
             id: CommandId::Quit,
@@ -318,6 +323,13 @@ impl Keymap {
                 mods: alt,
             },
             CommandId::OpenSearchPane,
+        );
+        bindings.insert(
+            Chord {
+                code: KeyCode::Char('l'),
+                mods: alt,
+            },
+            CommandId::OpenLifeOsPane,
         );
         bindings.insert(
             Chord {

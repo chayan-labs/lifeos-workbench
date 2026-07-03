@@ -17,7 +17,8 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use muda::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+use muda::accelerator::{Accelerator, Code, CMD_OR_CTRL};
+use muda::{AboutMetadata, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use ratatui::backend::Backend;
 use ratatui::Terminal;
 use ratatui_wgpu::{Builder, Dimensions, Fonts, Viewport, WgpuBackend};
@@ -27,12 +28,27 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState};
 use winit::window::{Window, WindowAttributes};
 
+/// The uncomposed key for chord matching. macOS composes Option into the
+/// logical key; other platforms deliver the base key already.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn key_without_modifiers(key: &winit::event::KeyEvent) -> Key {
+    use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+    key.key_without_modifiers()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn key_without_modifiers(key: &winit::event::KeyEvent) -> Key {
+    key.logical_key.clone()
+}
+
 use crate::api::InProcessApi;
 use crate::driver;
+use crate::palette::CommandId;
 use crate::pane_store::PaneStore;
 use crate::shell::Shell;
 use crate::theme::{ColorSupport, Theme, BG};
 use postprocess::CenteredPostProcessor;
+use std::collections::HashMap;
 
 /// Frame cadence while idle: terminal panes produce output asynchronously,
 /// so redraw on a short tick (mirrors the 50ms poll of the TUI loop).
@@ -48,6 +64,7 @@ pub fn run_gui(api: InProcessApi, workspace: String) -> Result<(), String> {
     event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + IDLE_FRAME));
     let cwd = std::env::current_dir().unwrap_or_default();
     let fonts = fonts::load_fonts()?;
+    let (menu, menu_actions) = build_menu_bar();
     let mut app = GuiApp {
         window: None,
         terminal: None,
@@ -61,7 +78,8 @@ pub fn run_gui(api: InProcessApi, workspace: String) -> Result<(), String> {
         fonts,
         title: window_title(&workspace, &cwd),
         warmup_frames: 2,
-        _menu: build_menu_bar(),
+        menu_actions,
+        _menu: menu,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())
 }
@@ -74,28 +92,133 @@ fn window_title(workspace: &str, cwd: &std::path::Path) -> String {
     format!("{workspace} - {dir}")
 }
 
-/// Native macOS menu bar (muda). Predefined items handle About/Hide/Quit
-/// through the standard responder chain, including the Cmd+Q accelerator.
-fn build_menu_bar() -> Option<Menu> {
+/// A wired menu entry: its click (or Cmd accelerator) runs a shell command.
+fn menu_item(
+    actions: &mut HashMap<MenuId, CommandId>,
+    title: &str,
+    cmd: CommandId,
+    accel: Option<Accelerator>,
+) -> MenuItem {
+    let item = MenuItem::new(title, true, accel);
+    actions.insert(item.id().clone(), cmd);
+    item
+}
+
+/// Native macOS menu bar (muda), every item wired to a `CommandId` (drained
+/// in `about_to_wait`). Predefined items handle About/Hide/Quit through the
+/// standard responder chain, including the Cmd+Q accelerator.
+fn build_menu_bar() -> (Option<Menu>, HashMap<MenuId, CommandId>) {
+    let mut actions = HashMap::new();
+    let cmd = |code| Some(Accelerator::new(Some(CMD_OR_CTRL), code));
     let menu = Menu::new();
+
     let about = AboutMetadata {
         name: Some("Life OS Workbench".to_string()),
         version: Some(env!("CARGO_PKG_VERSION").to_string()),
         ..Default::default()
     };
     let app_menu = Submenu::new("Workbench", true);
-    let items: [&dyn muda::IsMenuItem; 5] = [
+    let app_items: [&dyn muda::IsMenuItem; 5] = [
         &PredefinedMenuItem::about(None, Some(about)),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::hide(None),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ];
-    app_menu.append_items(&items).ok()?;
-    menu.append(&app_menu).ok()?;
+
+    let file = Submenu::new("File", true);
+    let file_items: [&dyn muda::IsMenuItem; 5] = [
+        &menu_item(&mut actions, "New Tab", CommandId::NewTab, cmd(Code::KeyT)),
+        &menu_item(
+            &mut actions,
+            "Open File…",
+            CommandId::OpenFilePicker,
+            cmd(Code::KeyO),
+        ),
+        &menu_item(
+            &mut actions,
+            "New Terminal Here",
+            CommandId::TerminalHere,
+            None,
+        ),
+        &PredefinedMenuItem::separator(),
+        &menu_item(
+            &mut actions,
+            "Close Pane",
+            CommandId::ClosePane,
+            cmd(Code::KeyW),
+        ),
+    ];
+
+    let view = Submenu::new("View", true);
+    let view_items: [&dyn muda::IsMenuItem; 7] = [
+        &menu_item(
+            &mut actions,
+            "Command Palette",
+            CommandId::OpenPalette,
+            cmd(Code::KeyK),
+        ),
+        &PredefinedMenuItem::separator(),
+        &menu_item(
+            &mut actions,
+            "Files Sidebar",
+            CommandId::ToggleSidebar,
+            cmd(Code::KeyB),
+        ),
+        &menu_item(
+            &mut actions,
+            "Terminal Dock",
+            CommandId::ToggleDock,
+            cmd(Code::KeyJ),
+        ),
+        &PredefinedMenuItem::separator(),
+        &menu_item(
+            &mut actions,
+            "Split Right",
+            CommandId::SplitHorizontal,
+            cmd(Code::KeyD),
+        ),
+        &menu_item(
+            &mut actions,
+            "Split Down",
+            CommandId::SplitVertical,
+            Some(Accelerator::new(
+                Some(CMD_OR_CTRL | muda::accelerator::Modifiers::SHIFT),
+                Code::KeyD,
+            )),
+        ),
+    ];
+
+    let lifeos = Submenu::new("Life OS", true);
+    let lifeos_items: [&dyn muda::IsMenuItem; 3] = [
+        &menu_item(
+            &mut actions,
+            "Browse Modules",
+            CommandId::OpenLifeOsPane,
+            cmd(Code::KeyL),
+        ),
+        &menu_item(&mut actions, "Agent Pane", CommandId::OpenAgentPane, None),
+        &menu_item(
+            &mut actions,
+            "Recall Search",
+            CommandId::OpenSearchPane,
+            None,
+        ),
+    ];
+
+    let built = (|| {
+        app_menu.append_items(&app_items).ok()?;
+        file.append_items(&file_items).ok()?;
+        view.append_items(&view_items).ok()?;
+        lifeos.append_items(&lifeos_items).ok()?;
+        menu.append_items(&[&app_menu, &file, &view, &lifeos]).ok()
+    })();
+    if built.is_none() {
+        return (None, HashMap::new());
+    }
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
-    Some(menu)
+    (Some(menu), actions)
 }
 
 struct GuiApp {
@@ -111,6 +234,8 @@ struct GuiApp {
     title: String,
     /// Full-repaint countdown for the first frames (cold glyph atlas).
     warmup_frames: u8,
+    /// Menu item → shell command; drained from muda's event channel.
+    menu_actions: HashMap<MenuId, CommandId>,
     _menu: Option<Menu>,
 }
 
@@ -138,6 +263,13 @@ impl GuiApp {
     }
 
     fn redraw(&mut self) {
+        // Shells that exited (`exit`, crash) close their pane before layout.
+        let dead = self.panes.reap_exited_terminals();
+        if !dead.is_empty() {
+            if let Some(shell) = self.shell.take() {
+                self.shell = Some(dead.iter().fold(shell, |s, id| s.on_pane_exit(*id)));
+            }
+        }
         let (Some(terminal), Some(shell)) = (self.terminal.as_mut(), self.shell.as_ref()) else {
             return;
         };
@@ -357,15 +489,26 @@ impl ApplicationHandler for GuiApp {
                 if key.state != ElementState::Pressed {
                     return;
                 }
+                // Chords need the base key: macOS Option composes characters
+                // (alt+f arrives as "ƒ", alt+e as a dead key), so strip the
+                // composition whenever a command modifier is held.
+                let logical = if self.modifiers.alt_key()
+                    || self.modifiers.control_key()
+                    || self.modifiers.super_key()
+                {
+                    key_without_modifiers(&key)
+                } else {
+                    key.logical_key.clone()
+                };
                 if self.modifiers.super_key() {
-                    if let Key::Character(s) = &key.logical_key {
+                    if let Key::Character(s) = &logical {
                         if s.as_str().eq_ignore_ascii_case("v") {
                             self.paste_clipboard(event_loop);
                             return;
                         }
                     }
                 }
-                if let Some(ev) = input::translate_key(&key.logical_key, self.modifiers) {
+                if let Some(ev) = input::translate_key(&logical, self.modifiers) {
                     self.handle_event(&ev, event_loop);
                 }
             }
@@ -375,6 +518,19 @@ impl ApplicationHandler for GuiApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Menu clicks and Cmd accelerators arrive on muda's channel.
+        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            if let Some(cmd) = self.menu_actions.get(ev.id()).copied() {
+                if let Some(shell) = self.shell.take() {
+                    let next = shell.run_command(cmd);
+                    let running = next.running;
+                    self.shell = Some(next);
+                    if !running {
+                        event_loop.exit();
+                    }
+                }
+            }
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }

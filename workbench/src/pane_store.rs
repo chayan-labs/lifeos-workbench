@@ -9,6 +9,7 @@ use crate::agent_pane::AgentPane;
 use crate::api::InProcessApi;
 use crate::editor::{EditorPane, LspOp};
 use crate::layout::PaneId;
+use crate::lifeos_pane::LifeOsPane;
 use crate::lsp::{server_for, LspClient};
 use crate::search_pane::SearchPane;
 use crate::shell::PaneDesire;
@@ -34,15 +35,17 @@ struct Entry {
     editor: Option<EditorPane>,
     agent: Option<AgentPane>,
     search: Option<SearchPane>,
+    lifeos: Option<LifeOsPane>,
     size: (u16, u16),
     lsp_synced_version: u64,
 }
 
-/// A pane's drawable interior (inside its border).
+/// A pane's drawable interior: below the header row, left of the reserved
+/// right-edge column (scrollbar / pane seam).
 fn inner(rect: Rect) -> (u16, u16) {
     (
-        rect.width.saturating_sub(2).max(1),
-        rect.height.saturating_sub(2).max(1),
+        rect.width.saturating_sub(1).max(1),
+        rect.height.saturating_sub(1).max(1),
     )
 }
 
@@ -59,7 +62,10 @@ impl PaneStore {
     /// for panes whose desire names a file, and service LSP traffic.
     pub fn sync(&mut self, rects: &[(PaneId, Rect)], desires: &HashMap<PaneId, PaneDesire>) {
         let live: Vec<PaneId> = rects.iter().map(|(id, _)| *id).collect();
-        self.panes.retain(|id, _| live.contains(id));
+        // A pane survives while it is on screen OR still desired (panes of
+        // background tabs keep their shells/editors across tab switches).
+        self.panes
+            .retain(|id, _| live.contains(id) || desires.contains_key(id));
         for (id, rect) in rects {
             let (cols, rows) = inner(*rect);
             let entry = self.panes.entry(*id).or_insert_with(|| Entry {
@@ -67,6 +73,7 @@ impl PaneStore {
                 editor: None,
                 agent: None,
                 search: None,
+                lifeos: None,
                 size: (0, 0),
                 lsp_synced_version: 0,
             });
@@ -95,6 +102,14 @@ impl PaneStore {
                             .api
                             .as_ref()
                             .map(|api| SearchPane::new(api.clone(), None));
+                    }
+                }
+                Some(PaneDesire::LifeOs) => {
+                    if entry.lifeos.is_none() {
+                        entry.lifeos = self
+                            .api
+                            .as_ref()
+                            .map(|api| LifeOsPane::new(api.clone(), None));
                     }
                 }
                 // Welcome panes hold no OS resources until a desire lands.
@@ -162,6 +177,23 @@ impl PaneStore {
         }
     }
 
+    /// Drop terminals whose child exited (`exit`, crash) and report their
+    /// pane ids so the shell can close the pane / dock. Called every frame;
+    /// `try_wait` is a cheap non-blocking check.
+    pub fn reap_exited_terminals(&mut self) -> Vec<PaneId> {
+        let mut dead: Vec<PaneId> = Vec::new();
+        for (id, entry) in self.panes.iter_mut() {
+            if let Some(term) = entry.term.as_mut() {
+                if term.is_exited() {
+                    entry.term = None;
+                    dead.push(*id);
+                }
+            }
+        }
+        dead.sort_unstable();
+        dead
+    }
+
     pub fn term(&self, id: PaneId) -> Option<&TermPane> {
         self.panes.get(&id).and_then(|e| e.term.as_ref())
     }
@@ -193,6 +225,14 @@ impl PaneStore {
     pub fn search_mut(&mut self, id: PaneId) -> Option<&mut SearchPane> {
         self.panes.get_mut(&id).and_then(|e| e.search.as_mut())
     }
+
+    pub fn lifeos(&self, id: PaneId) -> Option<&LifeOsPane> {
+        self.panes.get(&id).and_then(|e| e.lifeos.as_ref())
+    }
+
+    pub fn lifeos_mut(&mut self, id: PaneId) -> Option<&mut LifeOsPane> {
+        self.panes.get_mut(&id).and_then(|e| e.lifeos.as_mut())
+    }
 }
 
 #[cfg(test)]
@@ -216,7 +256,7 @@ mod tests {
 
         store.sync(&[(1, rect(60, 12))], &desires);
         assert!(store.term(0).is_none(), "closed pane reaped");
-        assert_eq!(store.term(1).unwrap().render_lines().len(), 10);
+        assert_eq!(store.term(1).unwrap().render_lines().len(), 11);
     }
 
     #[test]

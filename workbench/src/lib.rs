@@ -12,6 +12,7 @@ pub mod file_tree;
 pub mod gui;
 pub mod highlight;
 pub mod layout;
+pub mod lifeos_pane;
 pub mod lsp;
 pub mod manifest;
 pub mod markdown;

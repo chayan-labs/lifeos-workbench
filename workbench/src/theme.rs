@@ -117,6 +117,43 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
+    /// Chrome panel fill (tab bar, sidebar, statusline): one shade above
+    /// the editor background, the Zed panel idiom.
+    pub fn panel_bg(&self) -> Style {
+        Style::default()
+            .bg(BG_ALT.resolve(self.support))
+            .fg(FG_DIM.resolve(self.support))
+    }
+
+    /// The focused pane's header row - raised surface, readable title.
+    pub fn header_focused(&self) -> Style {
+        Style::default()
+            .bg(SURFACE.resolve(self.support))
+            .fg(FG.resolve(self.support))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Unfocused pane headers recede into the panel shade.
+    pub fn header_unfocused(&self) -> Style {
+        Style::default()
+            .bg(BG_ALT.resolve(self.support))
+            .fg(FG_DIM.resolve(self.support))
+    }
+
+    /// The active tab connects to the editor surface below it.
+    pub fn tab_active(&self) -> Style {
+        Style::default()
+            .bg(BG.resolve(self.support))
+            .fg(FG.resolve(self.support))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn tab_inactive(&self) -> Style {
+        Style::default()
+            .bg(BG_ALT.resolve(self.support))
+            .fg(FG_DIM.resolve(self.support))
+    }
+
     /// Level 1: resting pane border.
     pub fn border_inactive(&self) -> (Style, border::Set) {
         (

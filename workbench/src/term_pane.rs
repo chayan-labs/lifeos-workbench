@@ -47,7 +47,7 @@ pub struct TermPane {
     term: Arc<FairMutex<Term<EventProxy>>>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 impl TermPane {
@@ -103,8 +103,14 @@ impl TermPane {
             term,
             master: pty.master,
             writer,
-            _child: child,
+            child,
         })
+    }
+
+    /// True once the child has exited (`exit`, crash, kill): the pane is a
+    /// corpse and the store reaps it so the shell can close the pane.
+    pub fn is_exited(&mut self) -> bool {
+        self.child.try_wait().map(|s| s.is_some()).unwrap_or(true)
     }
 
     /// Resize both the pty (so the child relayouts) and the VTE grid.
@@ -254,6 +260,10 @@ fn named_color(named: NamedColor) -> Option<Color> {
 /// cursor mode), nav keys, and Alt-prefixed input.
 pub fn encode_key(key: &KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     let mods = key.modifiers;
+    // Cmd chords belong to the app/menu layer, never to the child shell.
+    if mods.contains(KeyModifiers::SUPER) {
+        return None;
+    }
     let mut bytes: Vec<u8> = match key.code {
         KeyCode::Char(c) if mods.contains(KeyModifiers::CONTROL) => {
             let upper = c.to_ascii_uppercase();
@@ -379,6 +389,29 @@ mod tests {
         assert!(
             grid_text(&pane).contains("line39"),
             "typing snaps back to the live bottom"
+        );
+    }
+
+    #[test]
+    fn exited_child_is_detected() {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args(["-c", "exit 0"]);
+        let mut pane = TermPane::spawn(Some(cmd), 80, 24).expect("spawn pty");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !pane.is_exited() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(pane.is_exited(), "exit must be observable via try_wait");
+    }
+
+    #[test]
+    fn super_chords_never_reach_the_child() {
+        assert_eq!(
+            encode_key(
+                &KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER),
+                false
+            ),
+            None
         );
     }
 

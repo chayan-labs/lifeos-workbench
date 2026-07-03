@@ -118,6 +118,32 @@ pub fn chrome_rects(area: Rect, sidebar_open: bool, dock_open: bool) -> Option<C
     })
 }
 
+/// A pane's one-row header (kind dot + title + close button). Panes are
+/// flat Zed-style surfaces: header on top, content below, no box borders.
+pub fn pane_header(rect: Rect) -> Rect {
+    Rect { height: 1, ..rect }
+}
+
+/// The drawable content region below the header.
+pub fn pane_content(rect: Rect) -> Rect {
+    Rect {
+        y: rect.y + 1,
+        height: rect.height.saturating_sub(1),
+        ..rect
+    }
+}
+
+/// The clickable ` × ` at the header's right edge.
+pub fn close_button(rect: Rect) -> Rect {
+    let width = 3.min(rect.width);
+    Rect {
+        x: rect.x + rect.width - width,
+        y: rect.y,
+        width,
+        height: 1,
+    }
+}
+
 /// What clicking the tab bar at a given column does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TabHit {
@@ -169,9 +195,10 @@ pub fn welcome_lines() -> Vec<(&'static str, bool)> {
         ),
         ("alt+e    editor here          alt+a    agent pane", false),
         (
-            "alt+s/v  split right/down     alt+/    recall search",
+            "alt+l    life os modules      alt+/    recall search",
             false,
         ),
+        ("alt+s/v  split right/down     alt+x    close pane", false),
         ("", false),
         ("click anywhere · scroll everywhere · drag files in", false),
     ]
